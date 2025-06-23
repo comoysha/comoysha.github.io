@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="UTF-8">
+  <title>直跳调弦助手</title>
+  <style>
+    body { font-family: sans-serif; padding: 16px; max-width: 480px; margin: auto; }
+    .topbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
+    .controls { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 8px; }
+    select, input, button { padding: 6px; font-size: 1rem; }
+    #resultCard { border: 1px solid #ccc; padding: 12px; border-radius: 8px; margin-top: 12px; }
+    table { width: 100%; border-collapse: collapse; margin: 8px 0; }
+    th, td { border: 1px solid #ddd; padding: 6px; text-align: center; }
+    tr:hover { background: #f5f5f5; cursor: pointer; }
+    .warning { color: #b00; font-weight: bold; }
+  </style>
+</head>
+<body>
+
+  <div class="topbar">
+    <div>🎸 直跳调弦助手</div>
+    <div>⋮</div>
+  </div>
+
+  <div class="controls">
+    <div>
+      <label>当前调弦 A<br>
+        <select id="fromPreset"></select>
+      </label>
+    </div>
+    <div>
+      <label>目标调弦 B<br>
+        <select id="toPreset"></select>
+      </label>
+    </div>
+    <div>
+      <label>Capo 读数<br>
+        <input type="text" id="capo" readonly>
+      </label>
+    </div>
+  </div>
+
+  <button id="calculateBtn">🎯 计算直跳差值</button>
+
+  <div id="resultCard" style="display:none;">
+    <p id="capoTarget"></p>
+    <table id="deltaTable">
+      <thead>
+        <tr><th>当前→目标</th><th>± 半音</th></tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+    <p id="tensionWarning" class="warning"></p>
+    <button id="playSeqBtn">🎵 顺序播放</button>
+    <button id="playTapBtn">✋ 点弦播放说明</button>
+  </div>
+
+  <script>
+    // 常量与内置预置
+    const THRESHOLD = 6;  // ±6 semitones
+    const NOTE2NUM = { C:0,'C#':1,D:2,'D#':3,E:4,F:5,'F#':6,G:7,'G#':8,A:9,'A#':10,B:11 };
+    const DEFAULT_PRESETS = [
+      { id:'standard', title:'Standard', capo:0, tuning:['E2','A2','D3','G3','B3','E4'] },
+      { id:'drifting', title:'流行的云', capo:0, tuning:['C2','G2','D3','G3','A3','D4'] },
+      { id:'shooting', title:'流星', capo:0, tuning:['D2','A2','G3','D3','G3','C4'] },
+      { id:'hana',title:'花', capo: 3, tuning: ['D2','A2','D3','F#3','A3','D4'] },
+      { id:'snowfall', title:'Snowfall', capo:0, tuning:['D2','A2','D3','G3','A3','D4'] }
+    ];
+
+    // 从 localStorage 读取或初始化
+    function loadSongs(){
+      let stored = localStorage.getItem('songs');
+      return stored ? JSON.parse(stored) : DEFAULT_PRESETS;
+    }
+    function saveSongs(songs){
+      localStorage.setItem('songs', JSON.stringify(songs));
+    }
+
+    // 填充下拉列表
+    function populateSelects(){
+      const songs = loadSongs();
+      ['fromPreset','toPreset'].forEach(id=>{
+        const sel = document.getElementById(id);
+        sel.innerHTML = '';
+        songs.forEach(s=>{
+          let opt = new Option(s.title, s.id);
+          sel.add(opt);
+        });
+        sel.add(new Option('+ 新建曲目…', '_new'));
+      });
+      // 默认选中 standard
+      document.getElementById('fromPreset').value = 'standard';
+      document.getElementById('toPreset').value = 'standard';
+      updateCapo();
+    }
+
+    // 处理“新建曲目”
+    function tryAddNew(selectId){
+      const sel = document.getElementById(selectId);
+      if(sel.value !== '_new') return false;
+      let title = prompt('新建曲目名称（英文/拼音）:');
+      if(!title) { sel.value = 'standard'; return true; }
+      let tuning = prompt('请输入 6 个音，用逗号分隔，例如 D2,A2,D3,G3,A3,D4 :');
+      let capo = parseInt(prompt('Capo 读数（0 表示无）:'),10) || 0;
+      const songs = loadSongs();
+      const id = title.toLowerCase().replace(/\s+/g,'-');
+      songs.push({ id, title, capo, tuning:tuning.split(',').map(s=>s.trim()) });
+      saveSongs(songs);
+      populateSelects();
+      // 选中新曲目
+      document.getElementById(selectId).value = id;
+      return true;
+    }
+
+    // 更新 Capo 显示
+    function updateCapo(){
+      const songs = loadSongs();
+      const toId = document.getElementById('toPreset').value;
+      const song = songs.find(s=>s.id===toId);
+      document.getElementById('capo').value = song ? 'Capo ' + song.capo : '';
+    }
+
+    // 提取音名（去除八度）
+    function notePart(str){
+      return str.slice(1,2)==='#' ? str.slice(0,2) : str.charAt(0);
+    }
+
+    // 计算 delta
+    function computeDelta(fromArr, toArr){
+      return fromArr.map((fa,i)=>{
+        let a = NOTE2NUM[notePart(fa)];
+        let b = NOTE2NUM[notePart(toArr[i])];
+        let d = (b - a + 12) % 12;
+        if(d > 6) d -= 12;
+        return d;
+      });
+    }
+
+    // 播放一个音
+    function playNote(noteStr){
+      // 解析音符字符串，格式为: 音名(可带#) + 八度数，如 A4, C#3
+      let match = noteStr.match(/^([A-G]#?)(\d)$/);
+      if(!match) return;
+      
+      // 提取音名和八度数
+      let [_, note, oct] = match;
+      
+      // 计算MIDI音符号(0-127)
+      // NOTE2NUM 将音名转为 0-11 的数字，+1 是因为MIDI从C-1开始记
+      let midi = NOTE2NUM[note] + (parseInt(oct,10)+1)*12;
+      
+      // 计算频率(Hz)：标准A4=440Hz，每升/降半音变化 2^(1/12)
+      let freq = 440 * Math.pow(2, (midi - 69)/12);
+      
+      // 创建音频上下文
+      const ctx = new (window.AudioContext||window.webkitAudioContext)();
+      
+      // 创建音频节点
+      const osc = ctx.createOscillator();  // 振荡器
+      const gain = ctx.createGain();       // 音量控制
+      const filter = ctx.createBiquadFilter(); // 滤波器
+      
+      // 设置民谣吉他音色参数
+      osc.type = 'triangle';  // 使用三角波作为基础波形
+      filter.type = 'lowpass';
+      filter.frequency.value = 2000;
+      filter.Q.value = 1;
+      
+      // 连接节点链: 振荡器 -> 滤波器 -> 音量控制 -> 输出
+      osc.connect(filter);
+      filter.connect(gain);
+      gain.connect(ctx.destination);
+      
+      // 设置频率
+      osc.frequency.value = freq;
+      
+      // 设置包络
+      gain.gain.setValueAtTime(0, ctx.currentTime);
+      gain.gain.linearRampToValueAtTime(0.8, ctx.currentTime + 0.01);  // 快速起音
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 1.5);  // 缓慢衰减
+      
+      // 开始播放
+      osc.start();
+      osc.stop(ctx.currentTime + 2);
+    }
+    // 顺序播放
+    function playSequential(arr){
+      arr.forEach((n,i)=>{
+        setTimeout(()=> playNote(n), i * 1000);
+      });
+    }
+
+    // 点击播放单弦：已由行监听实现
+
+    // 绑定事件
+    window.onload = ()=>{
+      populateSelects();
+      ['fromPreset','toPreset'].forEach(id=>{
+        document.getElementById(id).addEventListener('change', e=>{
+          if(tryAddNew(id)) return;
+          if(id==='toPreset') updateCapo();
+        });
+      });
+
+      document.getElementById('calculateBtn').onclick = ()=>{
+        const songs = loadSongs();
+        const from = songs.find(s=>s.id===document.getElementById('fromPreset').value);
+        const to   = songs.find(s=>s.id===document.getElementById('toPreset').value);
+        if(!from||!to) return;
+
+        const deltas = computeDelta(from.tuning, to.tuning);
+        // 渲染表格
+        let tbody = document.querySelector('#deltaTable tbody');
+        tbody.innerHTML = '';
+        deltas.forEach((d,i)=>{
+          let tr = document.createElement('tr');
+          let cur = notePart(from.tuning[i]), tgt = notePart(to.tuning[i]);
+          tr.innerHTML = `<td>${cur}→${tgt}</td><td>${d>0? '↑'+d : d<0? '↓'+(-d) : '0'}</td>`;
+          tr.onclick = ()=> playNote(to.tuning[i]);
+          tbody.appendChild(tr);
+        });
+        // 警告
+        let warn = deltas.map((d,i)=> Math.abs(d)>THRESHOLD? `${i+1}弦${d>0?'↑'+d:'↓'+(-d)}` : '')
+                         .filter(Boolean).join('，');
+        document.getElementById('tensionWarning').textContent =
+          warn? `⚠ ${warn} (>±${THRESHOLD} 半音) — 请留意张力` : '';
+        // 显示结果
+        document.getElementById('capoTarget').textContent = `Capo 目标: ${to.capo}`;
+        document.getElementById('resultCard').style.display = 'block';
+        // 绑定播放
+        document.getElementById('playSeqBtn').onclick = ()=> playSequential(to.tuning);
+      };
+
+      document.getElementById('playTapBtn').onclick = ()=>{
+        alert('已启用点弦播放：点击表格任意行可播放对应弦音');
+      };
+    };
+  </script>
+
+</body>
+</html>
