@@ -2,41 +2,342 @@
 <html lang="zh">
 <head>
   <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>直跳调弦助手</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700&display=swap" rel="stylesheet">
   <style>
-    body { font-family: sans-serif; padding: 16px; max-width: 480px; margin: auto; }
-    .topbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
-    .controls { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 8px; }
-    select, input, button { padding: 6px; font-size: 1rem; }
-    #resultCard { border: 1px solid #ccc; padding: 12px; border-radius: 8px; margin-top: 12px; }
-    table { width: 100%; border-collapse: collapse; margin: 8px 0; }
-    th, td { border: 1px solid #ddd; padding: 6px; text-align: center; }
-    tr:hover { background: #f5f5f5; cursor: pointer; }
-    .warning { color: #b00; font-weight: bold; }
+    :root {
+      --primary: #3D5A80;
+      --primary-light: #98C1D9;
+      --secondary: #EE6C4D;
+      --dark: #293241;
+      --light: #E0FBFC;
+      --shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+      --radius: 12px;
+      --transition: all 0.3s ease;
+    }
+    
+    * {
+      box-sizing: border-box;
+      -webkit-tap-highlight-color: transparent;
+    }
+    
+    body { 
+      font-family: 'Noto Sans SC', sans-serif; 
+      padding: 16px; 
+      max-width: 520px; 
+      margin: 0 auto; 
+      background-color: #f8f9fa;
+      color: var(--dark);
+      line-height: 1.5;
+    }
+    
+    .topbar { 
+      display: flex; 
+      justify-content: space-between; 
+      align-items: center; 
+      margin-bottom: 24px; 
+      padding-bottom: 12px;
+      border-bottom: 1px solid rgba(0,0,0,0.05);
+    }
+    
+    .app-title {
+      font-size: 1.25rem;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    
+    .menu-button {
+      background: none;
+      border: none;
+      font-size: 1.5rem;
+      color: var(--dark);
+      cursor: pointer;
+      padding: 8px;
+      border-radius: 50%;
+      transition: var(--transition);
+    }
+    
+    .menu-button:hover {
+      background-color: rgba(0,0,0,0.05);
+    }
+    
+    .controls { 
+      display: grid; 
+      grid-template-columns: 1fr 1fr; 
+      gap: 16px; 
+      margin-bottom: 20px; 
+    }
+
+    .controls > div {
+      background-color: white;
+      padding: 16px;
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+    }
+    
+    .control-field {
+      width: 100%;
+    }
+    
+    .capo-field {
+      grid-column: 1 / -1;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    
+    .capo-field input {
+      flex: 1;
+      text-align: center;
+      font-weight: 500;
+      color: var(--secondary);
+    }
+    
+    label {
+      display: block;
+      margin-bottom: 8px;
+      font-weight: 500;
+      color: var(--dark);
+    }
+    
+    select, input, button { 
+      width: 100%;
+      padding: 12px; 
+      font-size: 1rem; 
+      border-radius: 8px;
+      border: 1px solid #dee2e6;
+      background-color: white;
+      transition: var(--transition);
+      appearance: none;
+      -webkit-appearance: none;
+    }
+    
+    select {
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='%23293241' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: right 12px center;
+      background-size: 16px;
+      padding-right: 36px;
+    }
+    
+    select:focus, input:focus {
+      outline: none;
+      border-color: var(--primary-light);
+      box-shadow: 0 0 0 3px rgba(152, 193, 217, 0.2);
+    }
+    
+    button {
+      cursor: pointer;
+      font-weight: 500;
+      letter-spacing: 0.5px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+    }
+    
+    #calculateBtn {
+      background-color: var(--primary);
+      color: white;
+      border: none;
+      padding: 16px;
+      font-size: 1.1rem;
+      box-shadow: var(--shadow);
+      margin-bottom: 24px;
+      transition: var(--transition);
+    }
+    
+    #calculateBtn:hover, #calculateBtn:focus {
+      background-color: #2c4361;
+      transform: translateY(-2px);
+      box-shadow: 0 6px 8px rgba(0, 0, 0, 0.15);
+    }
+    
+    #calculateBtn:active {
+      transform: translateY(0);
+    }
+    
+    #resultCard { 
+      background-color: white;
+      border: none; 
+      padding: 20px; 
+      border-radius: var(--radius); 
+      margin-top: 20px; 
+      box-shadow: var(--shadow);
+      animation: fadeIn 0.5s ease;
+    }
+    
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(10px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    
+    #capoTarget {
+      font-size: 1.1rem;
+      font-weight: 500;
+      color: var(--primary);
+      margin-top: 0;
+      text-align: center;
+    }
+    
+    table { 
+      width: 100%; 
+      border-collapse: collapse; 
+      margin: 16px 0;
+      border-radius: 8px;
+      overflow: hidden;
+      box-shadow: 0 0 0 1px #e9ecef;
+    }
+    
+    th { 
+      background-color: var(--primary-light);
+      color: var(--dark);
+      padding: 12px; 
+      text-align: center;
+      font-weight: 500;
+    }
+    
+    td { 
+      border-top: 1px solid #e9ecef;
+      padding: 12px; 
+      text-align: center; 
+    }
+    
+    tr {
+      transition: var(--transition);
+    }
+    
+    tr:hover { 
+      background: #f1f3f5; 
+      cursor: pointer; 
+    }
+
+    tr:active {
+      background: #e9ecef;
+    }
+    
+    .warning { 
+      color: var(--secondary); 
+      font-weight: 500; 
+      padding: 12px;
+      border-radius: 8px;
+      background-color: rgba(238, 108, 77, 0.1);
+      margin: 16px 0;
+    }
+    
+    .action-buttons {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+      margin-top: 16px;
+    }
+    
+    #playSeqBtn, #playTapBtn {
+      background-color: var(--primary-light);
+      color: var(--dark);
+      border: none;
+      transition: var(--transition);
+    }
+    
+    #playSeqBtn:hover, #playTapBtn:hover {
+      background-color: #7ba9c3;
+      transform: translateY(-2px);
+    }
+    
+    #playSeqBtn:active, #playTapBtn:active {
+      transform: translateY(0);
+    }
+    
+    @media (max-width: 480px) {
+      body {
+        padding: 12px;
+      }
+      
+      .controls {
+        grid-template-columns: 1fr;
+      }
+      
+      .action-buttons {
+        grid-template-columns: 1fr;
+      }
+    }
+    
+    /* 添加暗色模式支持 */
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --primary: #98C1D9;
+        --primary-light: #3D5A80;
+        --dark: #E0FBFC;
+        --light: #293241;
+        --shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+      }
+      
+      body {
+        background-color: #121212;
+        color: var(--dark);
+      }
+      
+      .controls > div,
+      #resultCard {
+        background-color: #1e1e1e;
+      }
+      
+      select, input {
+        background-color: #2a2a2a;
+        border-color: #444;
+        color: #e0e0e0;
+      }
+      
+      select {
+        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='%23e0e0e0' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+      }
+      
+      th {
+        background-color: #2c4361;
+        color: #e0e0e0;
+      }
+      
+      td {
+        border-color: #333;
+      }
+      
+      tr:hover {
+        background-color: #333;
+      }
+      
+      .warning {
+        background-color: rgba(238, 108, 77, 0.2);
+      }
+      
+      .topbar {
+        border-color: rgba(255,255,255,0.05);
+      }
+    }
   </style>
 </head>
 <body>
 
   <div class="topbar">
-    <div>🎸 直跳调弦助手</div>
-    <div>⋮</div>
+    <div class="app-title">🎸 直跳调弦助手</div>
   </div>
 
   <div class="controls">
-    <div>
-      <label>当前调弦 A<br>
-        <select id="fromPreset"></select>
-      </label>
+    <div class="control-field">
+      <label for="fromPreset">当前调弦 A</label>
+      <select id="fromPreset"></select>
     </div>
-    <div>
-      <label>目标调弦 B<br>
-        <select id="toPreset"></select>
-      </label>
+    <div class="control-field">
+      <label for="toPreset">目标调弦 B</label>
+      <select id="toPreset"></select>
     </div>
-    <div>
-      <label>Capo 读数<br>
-        <input type="text" id="capo" readonly>
-      </label>
+    <div class="capo-field">
+      <label for="capo">Capo 读数</label>
+      <input type="text" id="capo" readonly>
     </div>
   </div>
 
@@ -51,8 +352,10 @@
       <tbody></tbody>
     </table>
     <p id="tensionWarning" class="warning"></p>
-    <button id="playSeqBtn">🎵 顺序播放</button>
-    <button id="playTapBtn">✋ 点弦播放说明</button>
+    <div class="action-buttons">
+      <button id="playSeqBtn">🎵 顺序播放</button>
+      <button id="playTapBtn">✋ 点弦播放</button>
+    </div>
   </div>
 
   <script>
@@ -61,9 +364,9 @@
     const NOTE2NUM = { C:0,'C#':1,D:2,'D#':3,E:4,F:5,'F#':6,G:7,'G#':8,A:9,'A#':10,B:11 };
     const DEFAULT_PRESETS = [
       { id:'standard', title:'Standard', capo:0, tuning:['E2','A2','D3','G3','B3','E4'] },
-      { id:'drifting', title:'流行的云', capo:0, tuning:['C2','G2','D3','G3','A3','D4'] },
+      { id:'drifting', title:'流行的云', capo:9, tuning:['C2','G2','D3','G3','A3','D4'] },
       { id:'shooting', title:'流星', capo:0, tuning:['D2','A2','G3','D3','G3','C4'] },
-      { id:'hana',title:'花', capo: 3, tuning: ['D2','A2','D3','F#3','A3','D4'] },
+      { id:'hana',title:'花', capo: 2, tuning: ['D2','A2','D3','F#3','A3','D4'] },
       { id:'snowfall', title:'Snowfall', capo:0, tuning:['D2','A2','D3','G3','A3','D4'] }
     ];
 
