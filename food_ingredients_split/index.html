@@ -45,22 +45,85 @@
       margin-bottom: 1.5rem;
     }
 
+    .prefix-control {
+      margin-bottom: 1rem;
+    }
+
+    .prefix-control label {
+      display: block;
+      font-size: 0.9rem;
+      font-weight: 500;
+      color: #4a5568;
+      margin-bottom: 0.5rem;
+    }
+
+    #prefixInput {
+      width: 100%;
+      padding: 0.75rem;
+      font-size: 0.9rem;
+      border: 2px solid #e1e5e9;
+      border-radius: 12px;
+      background: #f8fafc;
+      transition: all 0.3s ease;
+      outline: none;
+    }
+
+    #prefixInput:focus {
+      border-color: #667eea;
+      background: #fff;
+      box-shadow: 0 0 0 4px rgba(102, 126, 234, 0.1);
+    }
+
+    .main-input-wrapper {
+      position: relative;
+      margin-bottom: 1rem;
+    }
+
     #inputText {
       width: 100%;
-      padding: 1rem;
+      padding: 1rem 3rem 1rem 1rem;
       font-size: 1rem;
       border: 2px solid #e1e5e9;
       border-radius: 16px;
       background: #f8fafc;
       transition: all 0.3s ease;
       outline: none;
-      margin-bottom: 1rem;
     }
 
     #inputText:focus {
       border-color: #667eea;
       background: #fff;
       box-shadow: 0 0 0 4px rgba(102, 126, 234, 0.1);
+    }
+
+    #clearBtn {
+      position: absolute;
+      right: 8px;
+      top: 50%;
+      transform: translateY(-50%);
+      width: 32px;
+      height: 32px;
+      border: none;
+      background: #e2e8f0;
+      border-radius: 50%;
+      cursor: pointer;
+      font-size: 0.8rem;
+      color: #64748b;
+      transition: all 0.2s ease;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0;
+    }
+
+    #clearBtn:hover {
+      background: #cbd5e1;
+      color: #475569;
+      transform: translateY(-50%) scale(1.1);
+    }
+
+    #clearBtn:active {
+      transform: translateY(-50%) scale(0.95);
     }
 
     #genBtn {
@@ -217,6 +280,10 @@
         padding: 0.875rem;
       }
       
+      #prefixInput {
+        padding: 0.625rem;
+      }
+      
       .ing-btn {
         padding: 0.625rem 1rem;
         font-size: 0.85rem;
@@ -229,7 +296,16 @@
     <h1>🍳 食材拆分复制</h1>
     
     <div class="input-group">
-      <input id="inputText" placeholder="输入食材，用中文逗号分隔 (例如：胡萝卜，土豆，洋葱)" />
+      <div class="prefix-control">
+        <label for="prefixInput">去除开头字符：</label>
+        <input id="prefixInput" type="text" value="买：" placeholder="例如：买：" />
+      </div>
+      
+      <div class="main-input-wrapper">
+        <input id="inputText" placeholder="输入食材，用中文逗号分隔 (例如：胡萝卜，土豆，洋葱)" />
+        <button id="clearBtn" type="button">✕</button>
+      </div>
+      
       <button id="genBtn">✨ 生成按钮</button>
     </div>
     
@@ -242,11 +318,19 @@
 
   <script>
     const input = document.getElementById('inputText');
+    const prefixInput = document.getElementById('prefixInput');
     const genBtn = document.getElementById('genBtn');
+    const clearBtn = document.getElementById('clearBtn');
     const container = document.getElementById('buttons');
 
     // 生成按钮功能
     genBtn.addEventListener('click', generateButtons);
+    
+    // 清空按钮功能
+    clearBtn.addEventListener('click', () => {
+      input.value = '';
+      input.focus();
+    });
     
     // 回车键快捷生成
     input.addEventListener('keypress', (e) => {
@@ -257,10 +341,22 @@
 
     function generateButtons() {
       container.innerHTML = '';
-      const items = input.value
+      const prefixToRemove = prefixInput.value || '';
+      
+      let items = input.value
         .split('，')
         .map(s => s.trim())
         .filter(s => s);
+      
+      // 如果设置了前缀，则去除每个项目开头的前缀
+      if (prefixToRemove) {
+        items = items.map(item => {
+          if (item.startsWith(prefixToRemove)) {
+            return item.substring(prefixToRemove.length).trim();
+          }
+          return item;
+        }).filter(s => s); // 过滤掉空字符串
+      }
       
       if (items.length === 0) {
         container.innerHTML = '<div class="empty-state">请输入食材内容</div>';
@@ -310,9 +406,6 @@
       
       document.body.removeChild(textArea);
     }
-
-    // 添加一些示例数据供测试
-    input.value = '胡萝卜，土豆，洋葱，大蒜，生姜';
   </script>
 </body>
 </html>
