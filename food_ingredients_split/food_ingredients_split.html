@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>食材拆分复制</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body { 
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      min-height: 100vh;
+      padding: 2rem 1rem;
+      color: #333;
+    }
+
+    .container {
+      max-width: 420px;
+      margin: 0 auto;
+      background: rgba(255, 255, 255, 0.95);
+      backdrop-filter: blur(20px);
+      border-radius: 24px;
+      padding: 2rem;
+      box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+    }
+
+    h1 {
+      text-align: center;
+      margin-bottom: 2rem;
+      font-size: 1.5rem;
+      font-weight: 600;
+      background: linear-gradient(135deg, #667eea, #764ba2);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+
+    .input-group {
+      margin-bottom: 1.5rem;
+    }
+
+    #inputText {
+      width: 100%;
+      padding: 1rem;
+      font-size: 1rem;
+      border: 2px solid #e1e5e9;
+      border-radius: 16px;
+      background: #f8fafc;
+      transition: all 0.3s ease;
+      outline: none;
+      margin-bottom: 1rem;
+    }
+
+    #inputText:focus {
+      border-color: #667eea;
+      background: #fff;
+      box-shadow: 0 0 0 4px rgba(102, 126, 234, 0.1);
+    }
+
+    #genBtn {
+      width: 100%;
+      padding: 1rem;
+      font-size: 1rem;
+      font-weight: 600;
+      background: linear-gradient(135deg, #667eea, #764ba2);
+      color: white;
+      border: none;
+      border-radius: 16px;
+      cursor: pointer;
+      transition: all 0.3s ease;
+      box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3);
+    }
+
+    #genBtn:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 8px 25px rgba(102, 126, 234, 0.4);
+    }
+
+    #genBtn:active {
+      transform: translateY(0);
+      box-shadow: 0 2px 10px rgba(102, 126, 234, 0.3);
+    }
+
+    #buttons {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.75rem;
+      margin-top: 1.5rem;
+    }
+
+    .ing-btn {
+      padding: 0.75rem 1.25rem;
+      border: 2px solid #e1e5e9;
+      border-radius: 25px;
+      background: #fff;
+      cursor: pointer;
+      font-size: 0.9rem;
+      font-weight: 500;
+      color: #4a5568;
+      transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+      user-select: none;
+      position: relative;
+      overflow: hidden;
+      min-width: fit-content;
+      white-space: nowrap;
+    }
+
+    .ing-btn::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: -100%;
+      width: 100%;
+      height: 100%;
+      background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.6), transparent);
+      transition: left 0.5s;
+    }
+
+    .ing-btn:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 6px 20px rgba(0, 0, 0, 0.1);
+      border-color: #667eea;
+      color: #667eea;
+    }
+
+    .ing-btn.copied:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 6px 20px rgba(72, 187, 120, 0.3);
+      background: linear-gradient(135deg, #38a169, #2f855a);
+    }
+
+    .ing-btn:hover::before {
+      left: 100%;
+    }
+
+    .ing-btn:active {
+      transform: scale(0.98);
+    }
+
+    .ing-btn.copied {
+      background: linear-gradient(135deg, #48bb78, #38a169);
+      border-color: #48bb78;
+      color: white;
+      animation: pulse 0.6s ease-out;
+    }
+
+    .ing-btn.copied::after {
+      content: '✓';
+      position: absolute;
+      right: 8px;
+      top: 50%;
+      transform: translateY(-50%);
+      font-size: 0.8rem;
+      animation: checkmark 0.3s ease-out;
+    }
+
+    @keyframes pulse {
+      0% {
+        transform: scale(1);
+      }
+      50% {
+        transform: scale(1.05);
+      }
+      100% {
+        transform: scale(1);
+      }
+    }
+
+    @keyframes checkmark {
+      0% {
+        opacity: 0;
+        transform: translateY(-50%) scale(0);
+      }
+      100% {
+        opacity: 1;
+        transform: translateY(-50%) scale(1);
+      }
+    }
+
+    .empty-state {
+      text-align: center;
+      padding: 2rem;
+      color: #a0aec0;
+      font-size: 0.9rem;
+    }
+
+    .empty-state::before {
+      content: '🥕';
+      display: block;
+      font-size: 2rem;
+      margin-bottom: 0.5rem;
+      opacity: 0.6;
+    }
+
+    /* 响应式设计 */
+    @media (max-width: 480px) {
+      body {
+        padding: 1rem 0.5rem;
+      }
+      
+      .container {
+        padding: 1.5rem;
+        border-radius: 20px;
+      }
+      
+      h1 {
+        font-size: 1.3rem;
+      }
+      
+      #inputText, #genBtn {
+        padding: 0.875rem;
+      }
+      
+      .ing-btn {
+        padding: 0.625rem 1rem;
+        font-size: 0.85rem;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>🍳 食材拆分复制</h1>
+    
+    <div class="input-group">
+      <input id="inputText" placeholder="输入食材，用中文逗号分隔 (例如：胡萝卜，土豆，洋葱)" />
+      <button id="genBtn">✨ 生成按钮</button>
+    </div>
+    
+    <div id="buttons">
+      <div class="empty-state">
+        输入食材后点击生成按钮
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const input = document.getElementById('inputText');
+    const genBtn = document.getElementById('genBtn');
+    const container = document.getElementById('buttons');
+
+    // 生成按钮功能
+    genBtn.addEventListener('click', generateButtons);
+    
+    // 回车键快捷生成
+    input.addEventListener('keypress', (e) => {
+      if (e.key === 'Enter') {
+        generateButtons();
+      }
+    });
+
+    function generateButtons() {
+      container.innerHTML = '';
+      const items = input.value
+        .split('，')
+        .map(s => s.trim())
+        .filter(s => s);
+      
+      if (items.length === 0) {
+        container.innerHTML = '<div class="empty-state">请输入食材内容</div>';
+        return;
+      }
+
+      items.forEach(text => {
+        const btn = document.createElement('button');
+        btn.textContent = text;
+        btn.className = 'ing-btn';
+        btn.addEventListener('click', () => copyToClipboard(btn, text));
+        container.appendChild(btn);
+      });
+    }
+
+    async function copyToClipboard(button, text) {
+      try {
+        await navigator.clipboard.writeText(text);
+        
+        // 添加复制成功样式，永久保持
+        button.classList.add('copied');
+        button.textContent = text + ' ';
+        
+      } catch (err) {
+        console.error('复制失败', err);
+        // 降级处理：选中文本
+        fallbackCopyTextToClipboard(text);
+        // 降级复制成功后也添加样式
+        button.classList.add('copied');
+        button.textContent = text + ' ';
+      }
+    }
+
+    // 降级复制方法
+    function fallbackCopyTextToClipboard(text) {
+      const textArea = document.createElement("textarea");
+      textArea.value = text;
+      document.body.appendChild(textArea);
+      textArea.focus();
+      textArea.select();
+      
+      try {
+        document.execCommand('copy');
+      } catch (err) {
+        console.error('降级复制也失败了', err);
+      }
+      
+      document.body.removeChild(textArea);
+    }
+
+    // 添加一些示例数据供测试
+    input.value = '胡萝卜，土豆，洋葱，大蒜，生姜';
+  </script>
+</body>
+</html>
