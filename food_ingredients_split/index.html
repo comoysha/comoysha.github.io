@@ -344,7 +344,7 @@
       const prefixToRemove = prefixInput.value || '';
       
       let items = input.value
-        .split('，')
+        .split(/[，、,；;]/)
         .map(s => s.trim())
         .filter(s => s);
       
