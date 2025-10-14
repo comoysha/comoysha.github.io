@@ -1,0 +1,453 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>签证电调准备卡片</title>
+    <style>
+        @media print {
+            .page {
+                page-break-after: always;
+            }
+            body {
+                margin: 0;
+                padding: 0;
+            }
+        }
+        
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: "Microsoft YaHei", "Heiti SC", "SimHei", sans-serif;
+            background: #f5f5f5;
+        }
+        
+        .page {
+            width: 290mm;
+            min-height: 297mm;
+            background: white;
+            margin: 0 auto;
+            padding: 15mm;
+            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+        }
+        
+        .page-title {
+            text-align: center;
+            font-size: 32px;
+            font-weight: bold;
+            color: #1a5490;
+            margin-bottom: 15px;
+            padding-bottom: 10px;
+            border-bottom: 4px solid #1a5490;
+        }
+        
+        .cards-container {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+        }
+        
+        .card {
+            border: 3px solid #2c5aa0;
+            border-radius: 12px;
+            padding: 15px;
+            background: linear-gradient(135deg, #f8f9ff 0%, #ffffff 100%);
+            box-shadow: 0 3px 8px rgba(0,0,0,0.1);
+        }
+        
+        .card-full {
+            grid-column: 1 / -1;
+        }
+        
+        .card-title {
+            font-size: 22px;
+            font-weight: bold;
+            color: #fff;
+            background: #2c5aa0;
+            padding: 10px 15px;
+            margin: -15px -15px 12px -15px;
+            border-radius: 9px 9px 0 0;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .qa-item {
+            margin-bottom: 14px;
+            padding: 10px;
+            background: white;
+            border-radius: 8px;
+            border-left: 5px solid #ff9500;
+        }
+        
+        .qa-item:last-child {
+            margin-bottom: 0;
+        }
+        
+        .question {
+            font-size: 18px;
+            font-weight: bold;
+            color: #d32f2f;
+            margin-bottom: 6px;
+        }
+        
+        .answer {
+            font-size: 17px;
+            color: #333;
+            line-height: 1.6;
+            padding-left: 8px;
+        }
+        
+        .highlight {
+            background: #fff59d;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-weight: bold;
+            color: #d84315;
+        }
+        
+        .info-row {
+            display: flex;
+            align-items: center;
+            font-size: 18px;
+            margin-bottom: 12px;
+            padding: 10px;
+            background: white;
+            border-radius: 8px;
+        }
+        
+        .info-row:last-child {
+            margin-bottom: 0;
+        }
+        
+        .info-label {
+            font-weight: bold;
+            color: #1565c0;
+            min-width: 110px;
+            font-size: 17px;
+        }
+        
+        .info-value {
+            color: #333;
+            flex: 1;
+            font-size: 17px;
+            line-height: 1.5;
+        }
+        
+        .flight-section {
+            margin-bottom: 12px;
+            padding: 12px;
+            background: #e3f2fd;
+            border-radius: 8px;
+            border-left: 5px solid #1976d2;
+        }
+        
+        .flight-section:last-child {
+            margin-bottom: 0;
+        }
+        
+        .flight-title {
+            font-size: 19px;
+            font-weight: bold;
+            color: #0d47a1;
+            margin-bottom: 8px;
+        }
+        
+        .flight-detail {
+            font-size: 17px;
+            color: #333;
+            margin-bottom: 5px;
+            padding-left: 10px;
+        }
+        
+        .emoji {
+            font-size: 24px;
+        }
+        
+        .day-card {
+            margin-bottom: 10px;
+            padding: 12px;
+            background: white;
+            border-radius: 8px;
+            border-left: 5px solid #4caf50;
+        }
+        
+        .day-card:last-child {
+            margin-bottom: 0;
+        }
+        
+        /* 多列的行程标题（第一行大字） */
+        .day-head {
+            display: grid;
+            grid-template-columns: 90px 110px 80px 1fr; /* 第几天 | 日期 | 周几 | 城市 */
+            align-items: baseline;
+            gap: 10px;
+            font-size: 20px;
+            font-weight: bold;
+            color: #2e7d32;
+            margin-bottom: 6px;
+        }
+        .day-col { min-width: 0; }
+        .day-col.city { color: #1b5e20; }
+        
+        .day-content {
+            font-size: 16px;
+            color: #333;
+            line-height: 1.5;
+        }
+        
+        /* 小屏或打印时列宽自适应 */
+        @media (max-width: 900px) {
+            .day-head { grid-template-columns: 80px 100px 70px 1fr; font-size: 19px; }
+        }
+        @media print {
+            .day-head { grid-template-columns: 80pt 100pt 70pt 1fr; font-size: 14pt; }
+        }
+        
+        .transport-item {
+            padding: 10px;
+            background: white;
+            border-radius: 8px;
+            margin-bottom: 10px;
+            border-left: 5px solid #ff6f00;
+        }
+        
+        .transport-item:last-child {
+            margin-bottom: 0;
+        }
+        
+        .transport-title {
+            font-size: 17px;
+            font-weight: bold;
+            color: #e65100;
+            margin-bottom: 5px;
+        }
+        
+        .transport-detail {
+            font-size: 16px;
+            color: #333;
+        }
+    </style>
+</head>
+<body>
+    <!-- 第1页 -->
+    <div class="page">
+        <div class="page-title">📋 签证电调准备资料（第1页）</div>
+        
+        <div class="cards-container">
+            <!-- 最核心信息 -->
+            <div class="card card-full">
+                <div class="card-title"><span class="emoji">⭐</span> 最核心信息（必记）</div>
+                <div class="info-row">
+                    <div class="info-label">📅 行程日期：</div>
+                    <div class="info-value"><span class="highlight">2025-10-26 至 11-02</span>（跨8天）</div>
+                </div>
+                <div class="info-row">
+                    <div class="info-label">✈️ 入境国家：</div>
+                    <div class="info-value"><span class="highlight">瑞士·苏黎世</span>（10/26抵达）</div>
+                </div>
+                <div class="info-row">
+                    <div class="info-label">🏨 主要停留：</div>
+                    <div class="info-value"><span class="highlight">瑞士4晚、意大利2晚</span></div>
+                </div>
+                <div class="info-row">
+                    <div class="info-label">👨‍👩‍👦 同行人：</div>
+                    <div class="info-value">丈夫<span class="highlight">夏国顺</span>(62岁退休)、儿子<span class="highlight">夏越</span>(37岁在职)</div>
+                </div>
+                <div class="info-row">
+                    <div class="info-label">🎯 旅行目的：</div>
+                    <div class="info-value"><span class="highlight">家庭旅游</span>（观光自由行，不跟团）</div>
+                </div>
+            </div>
+            
+            <!-- 常见问答1 -->
+            <div class="card">
+                <div class="card-title"><span class="emoji">❓</span> 常见电调问答（1）</div>
+                
+                <div class="qa-item">
+                    <div class="question">Q: 为什么这么晚申请？</div>
+                    <div class="answer">因为前一次<span class="highlight">意大利签证被拒</span>（9月22日），结果领取不及时</div>
+                </div>
+                
+                <div class="qa-item">
+                    <div class="question">Q: 去哪些国家？</div>
+                    <div class="answer"><span class="highlight">瑞士（4晚）</span>、意大利（2晚）</div>
+                </div>
+                
+                <div class="qa-item">
+                    <div class="question">Q: 入境与离境？</div>
+                    <div class="answer"><span class="highlight">10/26</span> 入境瑞士苏黎世<br><span class="highlight">11/01</span> 从意大利罗马离境</div>
+                </div>
+                
+                <div class="qa-item">
+                    <div class="question">Q: 住在哪里？</div>
+                    <div class="answer">苏黎世4晚住<span class="highlight">宜必思酒店</span>（距火车站电车10分钟）<br>罗马2晚住酒店（梵蒂冈附近）</div>
+                </div>
+            </div>
+            
+            <!-- 常见问答2 -->
+            <div class="card">
+                <div class="card-title"><span class="emoji">❓</span> 常见电调问答（2）</div>
+                
+                <div class="qa-item">
+                    <div class="question">Q: 为什么申请瑞士签证？</div>
+                    <div class="answer">在申根区<span class="highlight">停留时间最长在瑞士</span>，且<span class="highlight">入境国是瑞士</span></div>
+                </div>
+                
+                <div class="qa-item">
+                    <div class="question">Q: 为什么不申请意大利签证？</div>
+                    <div class="answer">第一次意大利签证被拒后，结果领取不及时，再次预约<span class="highlight">近期没有号了</span></div>
+                </div>
+                
+                <div class="qa-item">
+                    <div class="question">Q: 谁承担费用？</div>
+                    <div class="answer"><span class="highlight">家庭共同承担</span></div>
+                </div>
+                
+                <div class="qa-item">
+                    <div class="question">Q: 谁做的计划？</div>
+                    <div class="answer">儿子<span class="highlight">夏越</span></div>
+                </div>
+            </div>
+            
+            <!-- 航班信息 -->
+            <div class="card card-full">
+                <div class="card-title"><span class="emoji">✈️</span> 航班信息（儿子夏越订票，3人同航班）</div>
+                
+                <div class="flight-section">
+                    <div class="flight-title">🛫 去程（阿联酋航空，迪拜中转）</div>
+                    <div class="flight-detail">📍 <span class="highlight">EK311</span> 杭州 00:10 → 迪拜 04:55（10/26）</div>
+                    <div class="flight-detail">📍 <span class="highlight">EK087</span> 迪拜 08:25 → 苏黎世 12:25（10/26）</div>
+                </div>
+                
+                <div class="flight-section">
+                    <div class="flight-title">🛬 回程（卡塔尔航空，多哈中转）</div>
+                    <div class="flight-detail">📍 <span class="highlight">QR132</span> 罗马 15:10 → 多哈 22:25（11/01）</div>
+                    <div class="flight-detail">📍 <span class="highlight">QR890</span> 多哈 02:15 → 杭州 15:25（11/02）</div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- 第2页 -->
+    <div class="page">
+        <div class="page-title">📋 签证电调准备资料（第2页）</div>
+        
+        <div class="cards-container">
+            <!-- 每日计划 -->
+            <div class="card card-full">
+                <div class="card-title"><span class="emoji">📅</span> 每日行程计划（共8天）</div>
+                
+                <div class="day-card">
+                    <div class="day-head">
+                        <div class="day-col day-index">第1天</div>
+                        <div class="day-col day-date">10/26</div>
+                        <div class="day-col day-week">周日</div>
+                        <div class="day-col day-city city">苏黎世</div>
+                    </div>
+                    <div class="day-content">入住 ibis Zürich City West，休整适应时差</div>
+                </div>
+                
+                <div class="day-card">
+                    <div class="day-head">
+                        <div class="day-col day-index">第2天</div>
+                        <div class="day-col day-date">10/27</div>
+                        <div class="day-col day-week">周一</div>
+                        <div class="day-col day-city city">卢塞恩·龙疆·因特拉肯</div>
+                    </div>
+                    <div class="day-content">🚂 火车往返，看点：湖光山色、龙疆村、因特拉肯湖畔</div>
+                </div>
+                
+                <div class="day-card">
+                    <div class="day-head">
+                        <div class="day-col day-index">第3天</div>
+                        <div class="day-col day-date">10/28</div>
+                        <div class="day-col day-week">周二</div>
+                        <div class="day-col day-city city">伯尔尼·施皮茨·劳特布龙嫩·米伦</div>
+                    </div>
+                    <div class="day-content">🚂 火车往返，看点：伯尔尼老城（联合国教科文组织遗产）、施皮茨城堡、劳特布龙嫩峡谷、米伦山村</div>
+                </div>
+                
+                <div class="day-card">
+                    <div class="day-head">
+                        <div class="day-col day-index">第4天</div>
+                        <div class="day-col day-date">10/29</div>
+                        <div class="day-col day-week">周三</div>
+                        <div class="day-col day-city city">沙夫豪森·莱茵瀑布·施泰因姆莱茵</div>
+                    </div>
+                    <div class="day-content">🚂 火车往返，游览瀑布和古镇</div>
+                </div>
+                
+                <div class="day-card">
+                    <div class="day-head">
+                        <div class="day-col day-index">第5天</div>
+                        <div class="day-col day-date">10/30</div>
+                        <div class="day-col day-week">周四</div>
+                        <div class="day-col day-city city">苏黎世→罗马</div>
+                    </div>
+                    <div class="day-content">🚂 火车前往罗马，入住罗马公寓，傍晚市区轻松游</div>
+                </div>
+                
+                <div class="day-card">
+                    <div class="day-head">
+                        <div class="day-col day-index">第6天</div>
+                        <div class="day-col day-date">10/31</div>
+                        <div class="day-col day-week">周五</div>
+                        <div class="day-col day-city city">罗马</div>
+                    </div>
+                    <div class="day-content">🏛️ 斗兽场（已订票）、万神殿、特雷维喷泉、西班牙台阶</div>
+                </div>
+                
+                <div class="day-card">
+                    <div class="day-head">
+                        <div class="day-col day-index">第7天</div>
+                        <div class="day-col day-date">11/01</div>
+                        <div class="day-col day-week">周六</div>
+                        <div class="day-col day-city city">罗马→多哈</div>
+                    </div>
+                    <div class="day-content">退房，前往罗马机场，飞往多哈（QR132）</div>
+                </div>
+                
+                <div class="day-card">
+                    <div class="day-head">
+                        <div class="day-col day-index">第8天</div>
+                        <div class="day-col day-date">11/02</div>
+                        <div class="day-col day-week">周日</div>
+                        <div class="day-col day-city city">多哈→杭州</div>
+                    </div>
+                    <div class="day-content">下午15:25抵达杭州</div>
+                </div>
+            </div>
+            
+            <!-- 交通方式 -->
+            <div class="card card-full">
+                <div class="card-title"><span class="emoji">🚆</span> 旅游期间交通方式</div>
+                
+                <div class="transport-item">
+                    <div class="transport-title">🚊 苏黎世市区（含机场到住处）</div>
+                    <div class="transport-detail">使用电车，购买<span class="highlight">一日通票</span></div>
+                </div>
+                
+                <div class="transport-item">
+                    <div class="transport-title">🚂 瑞士旅游城市之间</div>
+                    <div class="transport-detail">使用火车，购买<span class="highlight">一日通票</span></div>
+                </div>
+                
+                <div class="transport-item">
+                    <div class="transport-title">🚄 瑞士苏黎世到意大利罗马</div>
+                    <div class="transport-detail">火车多次换乘：<span class="highlight">苏黎世→米兰→佛罗伦萨→罗马</span></div>
+                </div>
+                
+                <div class="transport-item">
+                    <div class="transport-title">🚇 罗马市区</div>
+                    <div class="transport-detail"><span class="highlight">步行 + 地铁</span>组合</div>
+                </div>
+            </div>
+        </div>
+    </div>
+</body>
+</html>
