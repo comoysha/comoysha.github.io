@@ -119,6 +119,27 @@
             background: white;
             border-radius: 8px;
         }
+
+        /* 2×3 两列布局（最核心信息） */
+        .info-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+        }
+        .info-item {
+            background: #fff;
+            border-radius: 8px;
+            padding: 12px;
+        }
+        .info-item .info-label {
+            font-size: 20px; /* 加大字号：标签 */
+            min-width: auto;
+        }
+        .info-item .info-value {
+            font-size: 19px; /* 加大字号：内容 */
+        }
+        .info-item.placeholder { visibility: hidden; }
+        @media (max-width: 900px) { .info-grid { grid-template-columns: 1fr; } }
         
         .info-row:last-child {
             margin-bottom: 0;
@@ -239,28 +260,31 @@
         <div class="page-title">📋 签证电调准备资料（第1页）</div>
         
         <div class="cards-container">
-            <!-- 最核心信息 -->
+            <!-- 最核心信息（2×3 两列布局） -->
             <div class="card card-full">
                 <div class="card-title"><span class="emoji">⭐</span> 最核心信息（必记）</div>
-                <div class="info-row">
-                    <div class="info-label">📅 行程日期：</div>
-                    <div class="info-value"><span class="highlight">2025-10-26 至 11-02</span>（跨8天）</div>
-                </div>
-                <div class="info-row">
-                    <div class="info-label">✈️ 入境国家：</div>
-                    <div class="info-value"><span class="highlight">瑞士·苏黎世</span>（10/26抵达）</div>
-                </div>
-                <div class="info-row">
-                    <div class="info-label">🏨 主要停留：</div>
-                    <div class="info-value"><span class="highlight">瑞士4晚、意大利2晚</span></div>
-                </div>
-                <div class="info-row">
-                    <div class="info-label">👨‍👩‍👦 同行人：</div>
-                    <div class="info-value">丈夫<span class="highlight">夏国顺</span>(62岁退休)、儿子<span class="highlight">夏越</span>(37岁在职)</div>
-                </div>
-                <div class="info-row">
-                    <div class="info-label">🎯 旅行目的：</div>
-                    <div class="info-value"><span class="highlight">家庭旅游</span>（观光自由行，不跟团）</div>
+                <div class="info-grid">
+                    <div class="info-item">
+                        <div class="info-label">📅 行程日期：</div>
+                        <div class="info-value"><span class="highlight">2025-10-26 至 11-02</span>（跨8天）</div>
+                    </div>
+                    <div class="info-item">
+                        <div class="info-label">✈️ 入境国家：</div>
+                        <div class="info-value"><span class="highlight">瑞士·苏黎世</span>（10/26抵达）</div>
+                    </div>
+                    <div class="info-item">
+                        <div class="info-label">🏨 主要停留：</div>
+                        <div class="info-value"><span class="highlight">瑞士4晚、意大利2晚</span></div>
+                    </div>
+                    <div class="info-item">
+                        <div class="info-label">👨‍👩‍👦 同行人：</div>
+                        <div class="info-value">丈夫<span class="highlight">夏国顺</span>(62岁退休)、儿子<span class="highlight">夏越</span>(37岁在职)</div>
+                    </div>
+                    <div class="info-item">
+                        <div class="info-label">🎯 旅行目的：</div>
+                        <div class="info-value"><span class="highlight">家庭旅游</span>（观光自由行，不跟团）</div>
+                    </div>
+                    <div class="info-item placeholder" aria-hidden="true"></div>
                 </div>
             </div>
             
