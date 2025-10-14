@@ -37,7 +37,7 @@
         
         .page-title {
             text-align: center;
-            font-size: 32px;
+            font-size: 18px;
             font-weight: bold;
             color: #1a5490;
             margin-bottom: 15px;
@@ -64,11 +64,11 @@
         }
         
         .card-title {
-            font-size: 22px;
+            font-size: 12px;
             font-weight: bold;
             color: #fff;
             background: #2c5aa0;
-            padding: 10px 15px;
+            padding: 2px 4px;
             margin: -15px -15px 12px -15px;
             border-radius: 9px 9px 0 0;
             display: flex;
@@ -107,7 +107,7 @@
             padding: 2px 6px;
             border-radius: 4px;
             font-weight: bold;
-            color: #d84315;
+            color: #000000;
         }
         
         .info-row {
@@ -132,14 +132,39 @@
             padding: 12px;
         }
         .info-item .info-label {
-            font-size: 20px; /* 加大字号：标签 */
+            font-size: 32px; /* 加大字号：标签 */
             min-width: auto;
         }
         .info-item .info-value {
-            font-size: 19px; /* 加大字号：内容 */
+            font-size: 26px; /* 加大字号：内容 */
         }
         .info-item.placeholder { visibility: hidden; }
         @media (max-width: 900px) { .info-grid { grid-template-columns: 1fr; } }
+
+        /* 2×2 矩阵通用样式（用于航班信息、交通方式） */
+        .matrix-2x2 {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+        }
+        .matrix-item {
+            background: #ffffff;
+            border-radius: 10px;
+            padding: 12px 14px;
+            border-left: 5px solid #5c6bc0;
+        }
+        .matrix-title {
+            font-size: 20px; /* 加大标题字号 */
+            font-weight: 700;
+            color: #1a237e;
+            margin-bottom: 6px;
+        }
+        .matrix-body {
+            font-size: 19px; /* 加大内容字号 */
+            color: #222;
+            line-height: 1.55;
+        }
+        @media (max-width: 900px) { .matrix-2x2 { grid-template-columns: 1fr; } }
         
         .info-row:last-child {
             margin-bottom: 0;
@@ -338,20 +363,26 @@
                 </div>
             </div>
             
-            <!-- 航班信息 -->
+            <!-- 航班信息（2×2 矩阵） -->
             <div class="card card-full">
                 <div class="card-title"><span class="emoji">✈️</span> 航班信息（儿子夏越订票，3人同航班）</div>
-                
-                <div class="flight-section">
-                    <div class="flight-title">🛫 去程（阿联酋航空，迪拜中转）</div>
-                    <div class="flight-detail">📍 <span class="highlight">EK311</span> 杭州 00:10 → 迪拜 04:55（10/26）</div>
-                    <div class="flight-detail">📍 <span class="highlight">EK087</span> 迪拜 08:25 → 苏黎世 12:25（10/26）</div>
-                </div>
-                
-                <div class="flight-section">
-                    <div class="flight-title">🛬 回程（卡塔尔航空，多哈中转）</div>
-                    <div class="flight-detail">📍 <span class="highlight">QR132</span> 罗马 15:10 → 多哈 22:25（11/01）</div>
-                    <div class="flight-detail">📍 <span class="highlight">QR890</span> 多哈 02:15 → 杭州 15:25（11/02）</div>
+                <div class="matrix-2x2">
+                    <div class="matrix-item">
+                        <div class="matrix-title">🛫 去程</div>
+                        <div class="matrix-body mono">EK311 杭州 00:10 → 迪拜 04:55（10/26）</div>
+                    </div>
+                    <div class="matrix-item">
+                        <div class="matrix-title">🛫 去程</div>
+                        <div class="matrix-body mono">EK087 迪拜 08:25 → 苏黎世 12:25（10/26）</div>
+                    </div>
+                    <div class="matrix-item">
+                        <div class="matrix-title">🛬 回程</div>
+                        <div class="matrix-body mono">QR132 罗马 15:10 → 多哈 22:25（11/01）</div>
+                    </div>
+                    <div class="matrix-item">
+                        <div class="matrix-title">🛬 回程</div>
+                        <div class="matrix-body mono">QR890 多哈 02:15 → 杭州 15:25（11/02）</div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -447,28 +478,26 @@
                 </div>
             </div>
             
-            <!-- 交通方式 -->
+            <!-- 交通方式（2×2 矩阵） -->
             <div class="card card-full">
                 <div class="card-title"><span class="emoji">🚆</span> 旅游期间交通方式</div>
-                
-                <div class="transport-item">
-                    <div class="transport-title">🚊 苏黎世市区（含机场到住处）</div>
-                    <div class="transport-detail">使用电车，购买<span class="highlight">一日通票</span></div>
-                </div>
-                
-                <div class="transport-item">
-                    <div class="transport-title">🚂 瑞士旅游城市之间</div>
-                    <div class="transport-detail">使用火车，购买<span class="highlight">一日通票</span></div>
-                </div>
-                
-                <div class="transport-item">
-                    <div class="transport-title">🚄 瑞士苏黎世到意大利罗马</div>
-                    <div class="transport-detail">火车多次换乘：<span class="highlight">苏黎世→米兰→佛罗伦萨→罗马</span></div>
-                </div>
-                
-                <div class="transport-item">
-                    <div class="transport-title">🚇 罗马市区</div>
-                    <div class="transport-detail"><span class="highlight">步行 + 地铁</span>组合</div>
+                <div class="matrix-2x2">
+                    <div class="matrix-item">
+                        <div class="matrix-title">🚊 苏黎世市区</div>
+                        <div class="matrix-body">电车，<span class="highlight">一日通票</span></div>
+                    </div>
+                    <div class="matrix-item">
+                        <div class="matrix-title">🚂 瑞士城市间</div>
+                        <div class="matrix-body">火车，<span class="highlight">一日通票</span></div>
+                    </div>
+                    <div class="matrix-item">
+                        <div class="matrix-title">🚄 苏黎世→罗马</div>
+                        <div class="matrix-body">火车换乘：<span class="highlight">苏黎世→米兰→佛罗伦萨→罗马</span></div>
+                    </div>
+                    <div class="matrix-item">
+                        <div class="matrix-title">🚇 罗马市区</div>
+                        <div class="matrix-body"><span class="highlight">步行 + 地铁</span> 组合</div>
+                    </div>
                 </div>
             </div>
         </div>
