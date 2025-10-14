@@ -229,16 +229,18 @@
         /* 多列的行程标题（第一行大字） */
         .day-head {
             display: grid;
-            grid-template-columns: 90px 110px 80px 1fr; /* 第几天 | 日期 | 周几 | 城市 */
+            /* 第几天 | 日期 | 周几 | 城市 | 看什么 */
+            grid-template-columns: 90px 110px 80px 210px 1fr;
             align-items: baseline;
             gap: 10px;
-            font-size: 20px;
+            font-size: 22px;
             font-weight: bold;
             color: #2e7d32;
             margin-bottom: 6px;
         }
         .day-col { min-width: 0; }
         .day-col.city { color: #1b5e20; }
+        .day-col.sights { color: #0d47a1; font-weight: 600; }
         
         .day-content {
             font-size: 16px;
@@ -248,10 +250,10 @@
         
         /* 小屏或打印时列宽自适应 */
         @media (max-width: 900px) {
-            .day-head { grid-template-columns: 80px 100px 70px 1fr; font-size: 19px; }
+            .day-head { grid-template-columns: 80px 100px 70px 140px 1fr; font-size: 20px; }
         }
         @media print {
-            .day-head { grid-template-columns: 80pt 100pt 70pt 1fr; font-size: 14pt; }
+            .day-head { grid-template-columns: 80pt 90pt 70pt 160pt 1fr; font-size: 15pt; }
         }
         
         .transport-item {
@@ -403,8 +405,8 @@
                         <div class="day-col day-date">10/26</div>
                         <div class="day-col day-week">周日</div>
                         <div class="day-col day-city city">苏黎世</div>
+                        <div class="day-col day-sights sights">入住 ibis Zürich City West，休整适应时差</div>
                     </div>
-                    <div class="day-content">入住 ibis Zürich City West，休整适应时差</div>
                 </div>
                 
                 <div class="day-card">
@@ -413,8 +415,8 @@
                         <div class="day-col day-date">10/27</div>
                         <div class="day-col day-week">周一</div>
                         <div class="day-col day-city city">卢塞恩·龙疆·因特拉肯</div>
+                        <div class="day-col day-sights sights">🚂 火车往返｜湖光山色、龙疆村、因特拉肯湖畔</div>
                     </div>
-                    <div class="day-content">🚂 火车往返，看点：湖光山色、龙疆村、因特拉肯湖畔</div>
                 </div>
                 
                 <div class="day-card">
@@ -423,8 +425,8 @@
                         <div class="day-col day-date">10/28</div>
                         <div class="day-col day-week">周二</div>
                         <div class="day-col day-city city">伯尔尼·施皮茨·劳特布龙嫩·米伦</div>
+                        <div class="day-col day-sights sights">🚂 火车往返｜伯尔尼老城（世遗）、施皮茨城堡、劳特布龙嫩峡谷、米伦山村</div>
                     </div>
-                    <div class="day-content">🚂 火车往返，看点：伯尔尼老城（联合国教科文组织遗产）、施皮茨城堡、劳特布龙嫩峡谷、米伦山村</div>
                 </div>
                 
                 <div class="day-card">
@@ -433,8 +435,8 @@
                         <div class="day-col day-date">10/29</div>
                         <div class="day-col day-week">周三</div>
                         <div class="day-col day-city city">沙夫豪森·莱茵瀑布·施泰因姆莱茵</div>
+                        <div class="day-col day-sights sights">🚂 火车往返｜莱茵瀑布、施泰因姆莱茵古镇</div>
                     </div>
-                    <div class="day-content">🚂 火车往返，游览瀑布和古镇</div>
                 </div>
                 
                 <div class="day-card">
@@ -443,8 +445,8 @@
                         <div class="day-col day-date">10/30</div>
                         <div class="day-col day-week">周四</div>
                         <div class="day-col day-city city">苏黎世→罗马</div>
+                        <div class="day-col day-sights sights">🚂 火车前往罗马｜入住公寓，傍晚市区轻松游</div>
                     </div>
-                    <div class="day-content">🚂 火车前往罗马，入住罗马公寓，傍晚市区轻松游</div>
                 </div>
                 
                 <div class="day-card">
@@ -453,8 +455,8 @@
                         <div class="day-col day-date">10/31</div>
                         <div class="day-col day-week">周五</div>
                         <div class="day-col day-city city">罗马</div>
+                        <div class="day-col day-sights sights">🏛️ 斗兽场（已订票）、万神殿、特雷维喷泉、西班牙台阶</div>
                     </div>
-                    <div class="day-content">🏛️ 斗兽场（已订票）、万神殿、特雷维喷泉、西班牙台阶</div>
                 </div>
                 
                 <div class="day-card">
@@ -463,8 +465,8 @@
                         <div class="day-col day-date">11/01</div>
                         <div class="day-col day-week">周六</div>
                         <div class="day-col day-city city">罗马→多哈</div>
+                        <div class="day-col day-sights sights">退房，前往罗马机场，飞往多哈（QR132）</div>
                     </div>
-                    <div class="day-content">退房，前往罗马机场，飞往多哈（QR132）</div>
                 </div>
                 
                 <div class="day-card">
@@ -473,8 +475,8 @@
                         <div class="day-col day-date">11/02</div>
                         <div class="day-col day-week">周日</div>
                         <div class="day-col day-city city">多哈→杭州</div>
+                        <div class="day-col day-sights sights">下午15:25抵达杭州</div>
                     </div>
-                    <div class="day-content">下午15:25抵达杭州</div>
                 </div>
             </div>
             
