@@ -179,6 +179,19 @@ const tosHelper = {
   },
 };
 
+// Strip base64 image data from record for sync/export (keep TOS URLs)
+function stripBase64(rec) {
+  var o = Object.assign({}, rec);
+  delete o.imageData; delete o.imageThumb;
+  if (o.images) {
+    o.images = o.images.map(function(img) {
+      if (img.imageUrl) return { imageUrl: img.imageUrl, thumbUrl: img.thumbUrl };
+      return null;
+    }).filter(Boolean);
+  }
+  return o;
+}
+
 const DEFAULT_MEMBERS = [
   { id: "m1", name: "我", avatar: "👤", color: "#4A7C6F" },
   { id: "m2", name: "女儿", avatar: "👧", color: "#C06B5D" },
@@ -415,11 +428,8 @@ function ImageViewer({ src, onClose }) {
   );
 }
 
-function ImageAttachment({ imageUrl, imageData, imageThumb, thumbUrl, onChange }) {
+function MultiImageAttachment({ images, onChange }) {
   var fileRef = useRef();
-  var currentSrc = imageUrl || imageData || null;
-  var currentThumbSrc = thumbUrl || imageThumb || null;
-  var [uploading, setUploading] = useState(false);
 
   var handleFile = function(e) {
     var file = e.target.files && e.target.files[0];
@@ -433,42 +443,80 @@ function ImageAttachment({ imageUrl, imageData, imageThumb, thumbUrl, onChange }
         var s = 88 / Math.max(img.width, img.height);
         c.width = img.width * s; c.height = img.height * s;
         c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
-        onChange({ imageData: fullData, imageThumb: c.toDataURL("image/jpeg", 0.7), imageUrl: null, thumbUrl: null });
+        onChange(images.concat([{ imageData: fullData, imageThumb: c.toDataURL("image/jpeg", 0.7) }]));
       };
       img.src = fullData;
     };
     reader.readAsDataURL(file);
+    if (fileRef.current) fileRef.current.value = "";
   };
 
-  var handleRemove = function() { onChange({ imageData: null, imageThumb: null, imageUrl: null, thumbUrl: null }); };
+  var handleRemove = function(idx) { onChange(images.filter(function(_, i) { return i !== idx; })); };
 
   return (
     <div style={{ marginBottom: 10 }}>
       <input ref={fileRef} type="file" accept="image/*" onChange={handleFile} style={{ display: "none" }} />
-      {!currentSrc && !currentThumbSrc ? (
-        <button onClick={function() { fileRef.current && fileRef.current.click(); }} style={{
-          width: "100%", padding: "12px", borderRadius: 10, border: "1.5px dashed #d0cdc5",
-          background: "#faf9f7", fontSize: 13, color: "#aaa", cursor: "pointer",
-          fontFamily: "'Noto Sans SC', sans-serif", display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
-        }}>
-          <span style={{ fontSize: 16 }}>📎</span> 添加图片（选填）
-        </button>
-      ) : (
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <div style={{ position: "relative", display: "inline-block" }}>
-            <img src={currentThumbSrc || currentSrc} alt="" style={{ width: 64, height: 64, borderRadius: 10, objectFit: "cover" }} />
-            <button onClick={handleRemove} style={{
-              position: "absolute", top: -6, right: -6, width: 20, height: 20, borderRadius: "50%",
-              border: "none", background: "#c06b5d", color: "#fff", fontSize: 12,
-              cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
-            }}>×</button>
-          </div>
-          <button onClick={function() { fileRef.current && fileRef.current.click(); }} style={{
-            padding: "6px 12px", borderRadius: 8, border: "1.5px solid #e8e5e0", background: "#fff",
-            fontSize: 12, color: "#888", cursor: "pointer", fontFamily: "'Noto Sans SC', sans-serif",
-          }}>换一张</button>
+      {images.length > 0 && (
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
+          {images.map(function(img, i) {
+            var src = img.thumbUrl || img.imageThumb || img.imageUrl || img.imageData;
+            return (
+              <div key={i} style={{ position: "relative", display: "inline-block" }}>
+                <img src={src} alt="" style={{ width: 64, height: 64, borderRadius: 10, objectFit: "cover" }} />
+                <button onClick={function() { handleRemove(i); }} style={{
+                  position: "absolute", top: -6, right: -6, width: 20, height: 20, borderRadius: "50%",
+                  border: "none", background: "#c06b5d", color: "#fff", fontSize: 12,
+                  cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
+                }}>×</button>
+              </div>
+            );
+          })}
         </div>
       )}
+      <button onClick={function() { fileRef.current && fileRef.current.click(); }} style={{
+        padding: "8px 14px", borderRadius: 8, border: "1.5px dashed #d0cdc5", background: "#faf9f7",
+        fontSize: 12, color: "#aaa", cursor: "pointer", fontFamily: "'Noto Sans SC', sans-serif",
+      }}>📎 添加图片</button>
+    </div>
+  );
+}
+
+function ItemList({ items, onChange, nameLabel, valueLabel, valueKey }) {
+  var handleChange = function(idx, field, val) {
+    var next = items.map(function(item, i) {
+      if (i !== idx) return item;
+      var o = Object.assign({}, item); o[field] = val; return o;
+    });
+    onChange(next);
+  };
+  var handleAdd = function() {
+    var o = { name: "" }; o[valueKey] = "";
+    onChange(items.concat([o]));
+  };
+  var handleRemove = function(idx) { onChange(items.filter(function(_, i) { return i !== idx; })); };
+  var rowStyle = { display: "flex", gap: 6, marginBottom: 6, alignItems: "center" };
+  var inputStyle = {
+    flex: 1, padding: "8px 10px", borderRadius: 8, border: "1.5px solid #e8e5e0",
+    fontSize: 13, fontFamily: "'Noto Sans SC', sans-serif", background: "#faf9f7", outline: "none", boxSizing: "border-box",
+  };
+  return (
+    <div style={{ marginBottom: 8 }}>
+      {items.map(function(item, i) {
+        return (
+          <div key={i} style={rowStyle}>
+            <input placeholder={nameLabel} value={item.name} onChange={function(e) { handleChange(i, "name", e.target.value); }} style={inputStyle} />
+            <input placeholder={valueLabel} value={item[valueKey] || ""} onChange={function(e) { handleChange(i, valueKey, e.target.value); }} style={inputStyle} />
+            <button onClick={function() { handleRemove(i); }} style={{
+              width: 24, height: 24, borderRadius: "50%", border: "none", background: "#f5e6e3",
+              color: "#c06b5d", fontSize: 13, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
+            }}>×</button>
+          </div>
+        );
+      })}
+      <button onClick={handleAdd} style={{
+        padding: "6px 12px", borderRadius: 8, border: "1.5px dashed #d0cdc5", background: "#faf9f7",
+        fontSize: 12, color: "#aaa", cursor: "pointer", fontFamily: "'Noto Sans SC', sans-serif",
+      }}>+ {nameLabel}</button>
     </div>
   );
 }
@@ -476,6 +524,7 @@ function ImageAttachment({ imageUrl, imageData, imageThumb, thumbUrl, onChange }
 function TypedFormFields({ type, state, setState, inputStyle }) {
   var fields = TYPE_FIELDS[type] || TYPE_FIELDS.note;
   var set = function(k) { return function(e) { var o = {}; o[k] = e.target.value; setState(Object.assign({}, state, o)); }; };
+  var setArr = function(k) { return function(arr) { var o = {}; o[k] = arr; setState(Object.assign({}, state, o)); }; };
   return (
     <>
       <input type="date" value={state.date} onChange={set("date")} style={Object.assign({}, inputStyle, { marginBottom: 8 })} />
@@ -483,61 +532,64 @@ function TypedFormFields({ type, state, setState, inputStyle }) {
       {fields.hospital && <input placeholder={fields.hospital === true ? "医院" : "医院（选填）"} value={state.hospital} onChange={set("hospital")} style={Object.assign({}, inputStyle, { marginBottom: 8 })} />}
       {fields.doctor && <input placeholder={fields.doctor === true ? "医生" : "医生（选填）"} value={state.doctor} onChange={set("doctor")} style={Object.assign({}, inputStyle, { marginBottom: 8 })} />}
       {fields.diagnosis && <input placeholder={fields.diagnosis === true ? "诊断" : "诊断（选填）"} value={state.diagnosis} onChange={set("diagnosis")} style={Object.assign({}, inputStyle, { marginBottom: 8 })} />}
-      {fields.medications && <input placeholder="用药，逗号分隔（如：阿奇霉素—5次点滴，顺尔宁4mg）" value={state.medText} onChange={set("medText")} style={Object.assign({}, inputStyle, { marginBottom: 8 })} />}
-      {fields.tests && <input placeholder="检查项，逗号分隔（如：血常规—白细胞偏高，CRP—12mg/L）" value={state.testText} onChange={set("testText")} style={Object.assign({}, inputStyle, { marginBottom: 8 })} />}
+      {fields.medications && <ItemList items={state.medications || []} onChange={setArr("medications")} nameLabel="药名" valueLabel="用法用量" valueKey="dosage" />}
+      {fields.tests && <ItemList items={state.tests || []} onChange={setArr("tests")} nameLabel="检查项" valueLabel="结果" valueKey="result" />}
       {fields.notes && <textarea placeholder="补充备注（选填）" value={state.notes} onChange={set("notes")} rows={2} style={Object.assign({}, inputStyle, { marginBottom: 8, resize: "vertical" })} />}
     </>
   );
 }
 
+// Helper: convert old single-image record to images array
+function getRecordImages(record) {
+  if (record.images && record.images.length) return record.images;
+  if (record.imageUrl) return [{ imageUrl: record.imageUrl, thumbUrl: record.thumbUrl }];
+  if (record.imageData) return [{ imageData: record.imageData, imageThumb: record.imageThumb }];
+  return [];
+}
+
 function EditForm({ record, members, onSave, onCancel }) {
-  var initMedText = (record.medications || []).map(function(m) { return m.name + (m.dosage ? "—" + m.dosage : ""); }).join("，");
-  var initTestText = (record.tests || []).map(function(t) { return t.name + (t.result ? "—" + t.result : ""); }).join("，");
   const [memberId, setMemberId] = useState(record.memberId);
   const [type, setType] = useState(record.type || "visit");
   const [formState, setFormState] = useState({
     date: record.date || "", summary: record.summary || "", hospital: record.hospital || "",
-    doctor: record.doctor || "", diagnosis: record.diagnosis || "", medText: initMedText,
-    testText: initTestText, notes: record.notes || "",
+    doctor: record.doctor || "", diagnosis: record.diagnosis || "",
+    medications: record.medications || [], tests: record.tests || [], notes: record.notes || "",
   });
-  const [imgState, setImgState] = useState({
-    imageUrl: record.imageUrl || null, thumbUrl: record.thumbUrl || null,
-    imageData: record.imageData || null, imageThumb: record.imageThumb || null,
-  });
+  const [images, setImages] = useState(getRecordImages(record));
   const [saving, setSaving] = useState(false);
 
   var handleSave = async function() {
     if (!formState.summary.trim() || saving) return;
     setSaving(true);
-    var meds = (formState.medText || "").split(/[,，\n]/).map(function(s) { return s.trim(); }).filter(Boolean).map(function(s) {
-      var parts = s.split(/[-—]/); return { name: (parts[0] || s).trim(), dosage: (parts[1] || "").trim() };
-    });
-    var tests = (formState.testText || "").split(/[,，\n]/).map(function(s) { return s.trim(); }).filter(Boolean).map(function(s) {
-      var parts = s.split(/[-—]/); return { name: (parts[0] || s).trim(), result: (parts[1] || "").trim() };
-    });
     var updated = Object.assign({}, record, {
       memberId: memberId, type: type, date: formState.date, summary: formState.summary.trim(),
       hospital: formState.hospital, doctor: formState.doctor, diagnosis: formState.diagnosis,
-      medications: meds, tests: tests, notes: formState.notes,
+      medications: (formState.medications || []).filter(function(m) { return m.name.trim(); }),
+      tests: (formState.tests || []).filter(function(t) { return t.name.trim(); }),
+      notes: formState.notes,
     });
-    // Handle image: if new local image, upload to TOS
-    if (imgState.imageData && !imgState.imageUrl) {
-      if (tosHelper.isConfigured()) {
-        try {
-          updated.imageUrl = await tosHelper.uploadBase64(imgState.imageData, record.id);
-          updated.thumbUrl = await tosHelper.uploadThumb(imgState.imageThumb, record.id);
-          delete updated.imageData; delete updated.imageThumb;
-        } catch (e) {
-          updated.imageData = imgState.imageData; updated.imageThumb = imgState.imageThumb;
+    // Clear old single-image fields
+    delete updated.imageUrl; delete updated.thumbUrl; delete updated.imageData; delete updated.imageThumb;
+    // Upload new images to TOS
+    if (images.length > 0) {
+      var uploaded = [];
+      for (var i = 0; i < images.length; i++) {
+        var img = images[i];
+        if (img.imageUrl) { uploaded.push({ imageUrl: img.imageUrl, thumbUrl: img.thumbUrl }); continue; }
+        if (img.imageData && tosHelper.isConfigured()) {
+          try {
+            var imgId = record.id + "-" + i + "-" + Date.now();
+            var u = await tosHelper.uploadBase64(img.imageData, imgId);
+            var t = await tosHelper.uploadThumb(img.imageThumb, imgId);
+            uploaded.push({ imageUrl: u, thumbUrl: t });
+          } catch (e) { uploaded.push({ imageData: img.imageData, imageThumb: img.imageThumb }); }
+        } else if (img.imageData) {
+          uploaded.push({ imageData: img.imageData, imageThumb: img.imageThumb });
         }
-      } else {
-        updated.imageData = imgState.imageData; updated.imageThumb = imgState.imageThumb;
       }
-    } else if (imgState.imageUrl) {
-      updated.imageUrl = imgState.imageUrl; updated.thumbUrl = imgState.thumbUrl;
-      delete updated.imageData; delete updated.imageThumb;
+      updated.images = uploaded;
     } else {
-      delete updated.imageUrl; delete updated.thumbUrl; delete updated.imageData; delete updated.imageThumb;
+      updated.images = [];
     }
     setSaving(false);
     onSave(updated);
@@ -558,7 +610,7 @@ function EditForm({ record, members, onSave, onCancel }) {
         {RECORD_TYPES.map(function(t) { return <TypeChip key={t.key} type={t} selected={type === t.key} onClick={function() { setType(t.key); }} />; })}
       </div>
       <TypedFormFields type={type} state={formState} setState={setFormState} inputStyle={inputStyle} />
-      <ImageAttachment imageUrl={imgState.imageUrl} imageData={imgState.imageData} imageThumb={imgState.imageThumb} thumbUrl={imgState.thumbUrl} onChange={setImgState} />
+      <MultiImageAttachment images={images} onChange={setImages} />
       <div style={{ display: "flex", gap: 10 }}>
         <button onClick={onCancel} style={{ flex: 1, padding: "10px", borderRadius: 12, border: "1.5px solid #e8e5e0", background: "#fff", fontSize: 13, color: "#888", cursor: "pointer", fontFamily: "'Noto Sans SC', sans-serif" }}>取消</button>
         <button onClick={handleSave} disabled={saving} style={{ flex: 2, padding: "10px", borderRadius: 12, border: "none", background: (formState.summary.trim() && !saving) ? "#4A7C6F" : "#ccc", color: "#fff", fontSize: 13, fontWeight: 600, cursor: (formState.summary.trim() && !saving) ? "pointer" : "default", fontFamily: "'Noto Sans SC', sans-serif" }}>{saving ? "保存中..." : "保存修改"}</button>
@@ -591,9 +643,18 @@ function RecordCard({ record, members, onDelete, onEdit }) {
           </div>
           <div style={{ fontSize: 14, color: "#333", fontFamily: "'Noto Sans SC', sans-serif", lineHeight: 1.5 }}>{record.summary}</div>
         </div>
-        {(record.thumbUrl || record.imageThumb) && (
-          <img src={record.thumbUrl || record.imageThumb} alt="" onClick={function(e) { e.stopPropagation(); setViewImage(record.imageUrl || record.imageData || record.thumbUrl || record.imageThumb); }} style={{ width: 44, height: 44, borderRadius: 8, objectFit: "cover", marginLeft: 10, flexShrink: 0, cursor: "pointer" }} />
-        )}
+        {(function() {
+          var imgs = getRecordImages(record);
+          if (imgs.length === 0) return null;
+          var first = imgs[0];
+          var src = first.thumbUrl || first.imageThumb || first.imageUrl || first.imageData;
+          return (
+            <div style={{ position: "relative", marginLeft: 10, flexShrink: 0 }}>
+              <img src={src} alt="" onClick={function(e) { e.stopPropagation(); setViewImage(first.imageUrl || first.imageData || src); }} style={{ width: 44, height: 44, borderRadius: 8, objectFit: "cover", cursor: "pointer" }} />
+              {imgs.length > 1 && <span style={{ position: "absolute", bottom: -2, right: -2, background: "#4A7C6F", color: "#fff", fontSize: 10, fontWeight: 600, borderRadius: 8, padding: "1px 5px", lineHeight: 1.4 }}>{imgs.length}</span>}
+            </div>
+          );
+        })()}
       </div>
       {expanded && (
         <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid #f0ede8" }}>
@@ -606,7 +667,18 @@ function RecordCard({ record, members, onDelete, onEdit }) {
             <div key={i} style={{ fontSize: 12, color: "#777", fontFamily: "'Noto Sans SC', sans-serif", paddingLeft: 4 }}>🔬 {test.name} {test.result && `— ${test.result}`}</div>
           ))}</div>}
           {record.notes && <div style={{ fontSize: 12, color: "#888", marginTop: 4, fontFamily: "'Noto Sans SC', sans-serif" }}>{record.notes}</div>}
-          {(record.imageUrl || record.imageData) && <img src={record.imageUrl || record.imageData} alt="原图" onClick={function(e) { e.stopPropagation(); setViewImage(record.imageUrl || record.imageData); }} style={{ width: "100%", borderRadius: 8, marginTop: 8, cursor: "pointer" }} />}
+          {(function() {
+            var imgs = getRecordImages(record);
+            if (imgs.length === 0) return null;
+            return (
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
+                {imgs.map(function(img, i) {
+                  var src = img.imageUrl || img.imageData || img.thumbUrl || img.imageThumb;
+                  return <img key={i} src={src} alt="" onClick={function(e) { e.stopPropagation(); setViewImage(img.imageUrl || img.imageData || src); }} style={{ width: imgs.length === 1 ? "100%" : 120, height: imgs.length === 1 ? "auto" : 120, borderRadius: 8, objectFit: "cover", cursor: "pointer" }} />;
+                })}
+              </div>
+            );
+          })()}
           <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
             <button onClick={(e) => { e.stopPropagation(); setEditing(true); }} style={{
               padding: "4px 12px", fontSize: 12, color: "#4A7C6F", background: "#4A7C6F15",
@@ -660,23 +732,27 @@ function AiTextModal({ type, aiConfig, onResult, onClose }) {
   );
 }
 
-function QuickForm({ type, memberId, onSave, onCancel, aiConfig }) {
-  var [formState, setFormState] = useState({
-    date: new Date().toISOString().slice(0, 10), summary: "", hospital: "", doctor: "",
-    diagnosis: "", medText: "", testText: "", notes: "",
+function QuickForm({ type, memberId, onSave, onCancel, aiConfig, initialData, initialImages }) {
+  var [formState, setFormState] = useState(function() {
+    var d = initialData || {};
+    return {
+      date: d.date || new Date().toISOString().slice(0, 10), summary: d.summary || "", hospital: d.hospital || "",
+      doctor: d.doctor || "", diagnosis: d.diagnosis || "",
+      medications: d.medications || [], tests: d.tests || [], notes: d.notes || "",
+    };
   });
-  var [imgState, setImgState] = useState({ imageData: null, imageThumb: null, imageUrl: null, thumbUrl: null });
+  var [images, setImages] = useState(initialImages || []);
   var [saving, setSaving] = useState(false);
   var [showAiText, setShowAiText] = useState(false);
 
   var handleAiResult = function(result) {
-    var medText = (result.medications || []).map(function(m) { return m.name + (m.dosage ? "—" + m.dosage : ""); }).join("，");
-    var testText = (result.tests || []).map(function(t) { return t.name + (t.result ? "—" + t.result : ""); }).join("，");
     setFormState({
       date: result.date || formState.date, summary: result.summary || formState.summary,
       hospital: result.hospital || formState.hospital, doctor: result.doctor || formState.doctor,
-      diagnosis: result.diagnosis || formState.diagnosis, medText: medText || formState.medText,
-      testText: testText || formState.testText, notes: result.notes || formState.notes,
+      diagnosis: result.diagnosis || formState.diagnosis,
+      medications: (result.medications && result.medications.length) ? result.medications : formState.medications,
+      tests: (result.tests && result.tests.length) ? result.tests : formState.tests,
+      notes: result.notes || formState.notes,
     });
   };
 
@@ -684,22 +760,29 @@ function QuickForm({ type, memberId, onSave, onCancel, aiConfig }) {
     if (!formState.summary.trim() || saving) return;
     setSaving(true);
     var id = createId();
-    var meds = (formState.medText || "").split(/[,，\n]/).map(function(s) { return s.trim(); }).filter(Boolean).map(function(s) {
-      var parts = s.split(/[-—]/); return { name: (parts[0] || s).trim(), dosage: (parts[1] || "").trim() };
-    });
-    var tests = (formState.testText || "").split(/[,，\n]/).map(function(s) { return s.trim(); }).filter(Boolean).map(function(s) {
-      var parts = s.split(/[-—]/); return { name: (parts[0] || s).trim(), result: (parts[1] || "").trim() };
-    });
     var record = { id: id, memberId: memberId, type: type, date: formState.date, summary: formState.summary.trim(),
       hospital: formState.hospital, doctor: formState.doctor, diagnosis: formState.diagnosis,
-      medications: meds, tests: tests, notes: formState.notes, createdAt: Date.now() };
-    if (imgState.imageData) {
-      if (tosHelper.isConfigured()) {
-        try {
-          record.imageUrl = await tosHelper.uploadBase64(imgState.imageData, id);
-          record.thumbUrl = await tosHelper.uploadThumb(imgState.imageThumb, id);
-        } catch (e) { record.imageData = imgState.imageData; record.imageThumb = imgState.imageThumb; }
-      } else { record.imageData = imgState.imageData; record.imageThumb = imgState.imageThumb; }
+      medications: (formState.medications || []).filter(function(m) { return m.name.trim(); }),
+      tests: (formState.tests || []).filter(function(t) { return t.name.trim(); }),
+      notes: formState.notes, createdAt: Date.now() };
+    // Upload images to TOS
+    if (images.length > 0) {
+      var uploaded = [];
+      for (var i = 0; i < images.length; i++) {
+        var img = images[i];
+        if (img.imageUrl) { uploaded.push({ imageUrl: img.imageUrl, thumbUrl: img.thumbUrl }); continue; }
+        if (img.imageData && tosHelper.isConfigured()) {
+          try {
+            var imgId = id + "-" + i;
+            var u = await tosHelper.uploadBase64(img.imageData, imgId);
+            var t = await tosHelper.uploadThumb(img.imageThumb, imgId);
+            uploaded.push({ imageUrl: u, thumbUrl: t });
+          } catch (e) { uploaded.push({ imageData: img.imageData, imageThumb: img.imageThumb }); }
+        } else if (img.imageData) {
+          uploaded.push({ imageData: img.imageData, imageThumb: img.imageThumb });
+        }
+      }
+      record.images = uploaded;
     }
     setSaving(false);
     onSave(record);
@@ -714,7 +797,7 @@ function QuickForm({ type, memberId, onSave, onCancel, aiConfig }) {
     <div style={{ padding: "0 0 20px" }}>
       {showAiText && <AiTextModal type={type} aiConfig={aiConfig} onResult={handleAiResult} onClose={function() { setShowAiText(false); }} />}
       <TypedFormFields type={type} state={formState} setState={setFormState} inputStyle={inputStyle} />
-      <ImageAttachment imageUrl={imgState.imageUrl} imageData={imgState.imageData} imageThumb={imgState.imageThumb} thumbUrl={imgState.thumbUrl} onChange={setImgState} />
+      <MultiImageAttachment images={images} onChange={setImages} />
       <button onClick={function() { setShowAiText(true); }} style={{
         width: "100%", padding: "10px", borderRadius: 10, border: "1.5px solid #5B7FA5", background: "#5B7FA518",
         fontSize: 13, color: "#5B7FA5", cursor: "pointer", fontFamily: "'Noto Sans SC', sans-serif", marginBottom: 12,
@@ -734,71 +817,45 @@ function QuickForm({ type, memberId, onSave, onCancel, aiConfig }) {
 
 function PhotoCapture({ members, onSave, onCancel, aiConfig, defaultMemberId }) {
   const [memberId, setMemberId] = useState(defaultMemberId || members[0]?.id);
-  const [status, setStatus] = useState("idle");
+  const [status, setStatus] = useState("idle"); // idle | processing | done | error | form
   const [extracted, setExtracted] = useState(null);
   const [imageData, setImageData] = useState(null);
   const [imageThumb, setImageThumb] = useState(null);
   const fileRef = useRef();
 
   const handleFile = async (e) => {
-    const file = e.target.files?.[0];
+    const file = e.target.files && e.target.files[0];
     if (!file) return;
-    if (!aiConfig.apiKey || !aiConfig.url || !aiConfig.endpoint) { alert("请先在设置中填写火山引擎配置"); return; }
+    if (!aiConfig || !aiConfig.apiKey || !aiConfig.url || !aiConfig.endpoint) { alert("请先在设置中填写火山引擎配置"); return; }
     setStatus("processing");
-    const fullData = await new Promise((res) => { const r = new FileReader(); r.onload = () => res(r.result); r.readAsDataURL(file); });
+    const fullData = await new Promise(function(res) { var r = new FileReader(); r.onload = function() { res(r.result); }; r.readAsDataURL(file); });
     setImageData(fullData);
-    const thumb = await new Promise((res) => {
-      const img = new Image();
-      img.onload = () => { const c = document.createElement("canvas"); const s = 88 / Math.max(img.width, img.height); c.width = img.width * s; c.height = img.height * s; c.getContext("2d").drawImage(img, 0, 0, c.width, c.height); res(c.toDataURL("image/jpeg", 0.7)); };
+    const thumb = await new Promise(function(res) {
+      var img = new Image();
+      img.onload = function() { var c = document.createElement("canvas"); var s = 88 / Math.max(img.width, img.height); c.width = img.width * s; c.height = img.height * s; c.getContext("2d").drawImage(img, 0, 0, c.width, c.height); res(c.toDataURL("image/jpeg", 0.7)); };
       img.src = fullData;
     });
     setImageThumb(thumb);
-    const base64 = fullData.split(",")[1];
-    const mediaType = file.type || "image/jpeg";
-    const result = await extractFromImage(base64, mediaType, aiConfig);
+    var base64 = fullData.split(",")[1];
+    var mediaType = file.type || "image/jpeg";
+    var result = await extractFromImage(base64, mediaType, aiConfig);
     if (result) { setExtracted(result); setStatus("done"); } else { setStatus("error"); }
   };
 
-  const handleSave = async () => {
-    if (!extracted) return;
-    var id = createId();
-    var record = {
-      id: id, memberId: memberId, type: extracted.type || "visit",
-      date: extracted.date || new Date().toISOString().slice(0, 10),
-      summary: extracted.summary || "拍照记录", hospital: extracted.hospital || "",
-      doctor: extracted.doctor || "", diagnosis: extracted.diagnosis || "",
-      medications: extracted.medications || [], tests: extracted.tests || [],
-      notes: "", createdAt: Date.now(),
-    };
-    // Upload images to TOS if configured
-    if (tosHelper.isConfigured() && imageData) {
-      setStatus("processing");
-      try {
-        var imgUrl = await tosHelper.uploadBase64(imageData, id);
-        var thumbUrl = await tosHelper.uploadThumb(imageThumb, id);
-        record.imageUrl = imgUrl;
-        record.thumbUrl = thumbUrl;
-      } catch (e) {
-        console.error("TOS upload failed, falling back to local:", e);
-        record.imageData = imageData;
-        record.imageThumb = imageThumb;
-      }
-    } else {
-      record.imageData = imageData;
-      record.imageThumb = imageThumb;
-    }
-    onSave(record);
-  };
+  // "下一步" — go to form with pre-filled data
+  var handleNext = function() { setStatus("form"); };
 
   return (
     <div style={{ padding: "0 0 20px" }}>
-      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 14 }}>
-        {members.map((m) => <MemberPill key={m.id} member={m} selected={memberId === m.id} onClick={() => setMemberId(m.id)} />)}
-      </div>
+      {status !== "form" && (
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 14 }}>
+          {members.map(function(m) { return <MemberPill key={m.id} member={m} selected={memberId === m.id} onClick={function() { setMemberId(m.id); }} />; })}
+        </div>
+      )}
       {status === "idle" && (
         <div>
           <input ref={fileRef} type="file" accept="image/*" capture="environment" onChange={handleFile} style={{ display: "none" }} />
-          <button onClick={() => fileRef.current?.click()} style={{
+          <button onClick={function() { fileRef.current && fileRef.current.click(); }} style={{
             width: "100%", padding: "40px 20px", borderRadius: 16, border: "2px dashed #d0cdc5",
             background: "#faf9f7", cursor: "pointer", display: "flex", flexDirection: "column", alignItems: "center", gap: 8,
           }}>
@@ -817,7 +874,7 @@ function PhotoCapture({ members, onSave, onCancel, aiConfig, defaultMemberId }) 
       {status === "error" && (
         <div style={{ textAlign: "center", padding: "30px 20px" }}>
           <div style={{ fontSize: 14, color: "#c06b5d", marginBottom: 12, fontFamily: "'Noto Sans SC', sans-serif" }}>识别失败，请重试或手动填写</div>
-          <button onClick={() => { setStatus("idle"); setImageData(null); }} style={{
+          <button onClick={function() { setStatus("idle"); setImageData(null); }} style={{
             padding: "8px 20px", borderRadius: 10, border: "1.5px solid #e8e5e0", background: "#fff", fontSize: 13, cursor: "pointer", fontFamily: "'Noto Sans SC', sans-serif",
           }}>重试</button>
         </div>
@@ -827,25 +884,42 @@ function PhotoCapture({ members, onSave, onCancel, aiConfig, defaultMemberId }) 
           <div style={{ background: "#f0f7f4", borderRadius: 12, padding: 14, marginBottom: 14, border: "1px solid #d5e8df" }}>
             <div style={{ fontSize: 12, color: "#4A7C6F", fontWeight: 600, marginBottom: 8, fontFamily: "'Noto Sans SC', sans-serif" }}>AI识别结果</div>
             {extracted.date && <div style={{ fontSize: 13, color: "#555", marginBottom: 3, fontFamily: "'Noto Sans SC', sans-serif" }}>📅 {extracted.date}</div>}
-            {extracted.hospital && <div style={{ fontSize: 13, color: "#555", marginBottom: 3, fontFamily: "'Noto Sans SC', sans-serif" }}>🏥 {extracted.hospital} {extracted.doctor && `· ${extracted.doctor}`}</div>}
+            {extracted.hospital && <div style={{ fontSize: 13, color: "#555", marginBottom: 3, fontFamily: "'Noto Sans SC', sans-serif" }}>🏥 {extracted.hospital} {extracted.doctor && (" · " + extracted.doctor)}</div>}
             {extracted.diagnosis && <div style={{ fontSize: 13, color: "#555", marginBottom: 3, fontFamily: "'Noto Sans SC', sans-serif" }}>📌 {extracted.diagnosis}</div>}
-            {extracted.medications?.length > 0 && extracted.medications.map((m, i) => (
-              <div key={i} style={{ fontSize: 12, color: "#666", paddingLeft: 4, fontFamily: "'Noto Sans SC', sans-serif" }}>💊 {m.name} {m.dosage && `— ${m.dosage}`}</div>
-            ))}
-            {extracted.tests?.length > 0 && extracted.tests.map((t, i) => (
-              <div key={i} style={{ fontSize: 12, color: "#666", paddingLeft: 4, fontFamily: "'Noto Sans SC', sans-serif" }}>🔬 {t.name} {t.result && `— ${t.result}`}</div>
-            ))}
+            {extracted.medications && extracted.medications.length > 0 && extracted.medications.map(function(m, i) {
+              return <div key={i} style={{ fontSize: 12, color: "#666", paddingLeft: 4, fontFamily: "'Noto Sans SC', sans-serif" }}>💊 {m.name} {m.dosage ? "— " + m.dosage : ""}</div>;
+            })}
+            {extracted.tests && extracted.tests.length > 0 && extracted.tests.map(function(t, i) {
+              return <div key={i} style={{ fontSize: 12, color: "#666", paddingLeft: 4, fontFamily: "'Noto Sans SC', sans-serif" }}>🔬 {t.name} {t.result ? "— " + t.result : ""}</div>;
+            })}
             {extracted.summary && <div style={{ fontSize: 13, color: "#333", marginTop: 6, fontWeight: 500, fontFamily: "'Noto Sans SC', sans-serif" }}>{extracted.summary}</div>}
           </div>
           {imageThumb && <img src={imageData} alt="" style={{ width: "100%", borderRadius: 10, marginBottom: 14 }} />}
           <div style={{ display: "flex", gap: 10 }}>
-            <button onClick={() => { setStatus("idle"); setExtracted(null); setImageData(null); }} style={{
+            <button onClick={function() { setStatus("idle"); setExtracted(null); setImageData(null); }} style={{
               flex: 1, padding: "12px", borderRadius: 12, border: "1.5px solid #e8e5e0", background: "#fff", fontSize: 14, color: "#888", cursor: "pointer", fontFamily: "'Noto Sans SC', sans-serif",
             }}>重拍</button>
-            <button onClick={handleSave} style={{
+            <button onClick={handleNext} style={{
               flex: 2, padding: "12px", borderRadius: 12, border: "none", background: "#4A7C6F", color: "#fff", fontSize: 14, fontWeight: 600, cursor: "pointer", fontFamily: "'Noto Sans SC', sans-serif",
-            }}>确认保存</button>
+            }}>下一步</button>
           </div>
+        </div>
+      )}
+      {status === "form" && extracted && (
+        <div>
+          <div style={{ fontSize: 14, fontWeight: 600, color: "#333", marginBottom: 10, fontFamily: "'Noto Sans SC', sans-serif" }}>
+            {(function() { var t = RECORD_TYPES.find(function(x) { return x.key === (extracted.type || "visit"); }); return t ? t.icon + " " + t.label : ""; })()}
+            <span style={{ fontSize: 12, color: "#aaa", fontWeight: 400, marginLeft: 8 }}>确认并编辑识别结果</span>
+          </div>
+          <QuickForm
+            type={extracted.type || "visit"}
+            memberId={memberId}
+            onSave={onSave}
+            onCancel={onCancel}
+            aiConfig={aiConfig}
+            initialData={extracted}
+            initialImages={[{ imageData: imageData, imageThumb: imageThumb }]}
+          />
         </div>
       )}
       {(status === "idle" || status === "error") && (
@@ -976,7 +1050,7 @@ function SyncSettingsModal({ onClose, onSyncDone, aiConfig }) {
       const local = await storage.load() || { members: [], records: [] };
       // Strip images from records before pushing
       const localDeleted = JSON.parse(localStorage.getItem("deleted-record-ids") || "[]");
-      const localForSync = { members: local.members, records: local.records.map(r => { const o = Object.assign({}, r); delete o.imageData; delete o.imageThumb; return o; }), deletedIds: localDeleted };
+      const localForSync = { members: local.members, records: local.records.map(r => { return stripBase64(r); }), deletedIds: localDeleted };
       const remoteClean = { members: remote.members || [], records: (remote.records || []), deletedIds: remote.deletedIds || [] };
       // Merge
       const merged = gistSync.mergeData(localForSync, remoteClean);
@@ -1158,7 +1232,7 @@ function MedicalRecords() {
           const remote = await gistSync.pull(cfg.token, cfg.gistId);
           const local = data || { members: [], records: [] };
           const localDeleted = JSON.parse(localStorage.getItem("deleted-record-ids") || "[]");
-          const localForSync = { members: local.members, records: (local.records || []).map(r => { const o = Object.assign({}, r); delete o.imageData; delete o.imageThumb; return o; }), deletedIds: localDeleted };
+          const localForSync = { members: local.members, records: (local.records || []).map(r => { return stripBase64(r); }), deletedIds: localDeleted };
           const merged = gistSync.mergeData(localForSync, { members: remote.members || [], records: remote.records || [], deletedIds: remote.deletedIds || [] });
           // Restore local images
           const localImageMap = new Map();
@@ -1209,7 +1283,7 @@ function MedicalRecords() {
     var r = newRecords || records;
     var d = newDeletedIds || JSON.parse(localStorage.getItem("deleted-record-ids") || "[]");
     var cfg = gistSync.getConfig();
-    var pushData = { members: m, records: r.map(function(rec) { var o = Object.assign({}, rec); delete o.imageData; delete o.imageThumb; return o; }), deletedIds: d };
+    var pushData = { members: m, records: r.map(function(rec) { return stripBase64(rec); }), deletedIds: d };
     var currentAi = JSON.parse(localStorage.getItem("volcengine-config") || "{}");
     gistSync.push(cfg.token, cfg.gistId, pushData, currentAi).catch(function(e) { console.error("Push failed:", e); });
   }, [members, records]);
@@ -1302,7 +1376,7 @@ function MedicalRecords() {
   };
 
   const exportData = () => {
-    const exportRecords = records.map(r => { const o = Object.assign({}, r); delete o.imageData; delete o.imageThumb; return o; });
+    const exportRecords = records.map(r => { return stripBase64(r); });
     const data = { members, records: exportRecords, exportedAt: new Date().toISOString() };
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
