@@ -503,7 +503,7 @@ function SyncSettingsModal({ onClose, onSyncDone }) {
       // Load local
       const local = await storage.load() || { members: [], records: [] };
       // Strip images from records before pushing (keep local images in localStorage)
-      const localForSync = { members: local.members, records: local.records.map(({ imageData, imageThumb, ...rest }) => rest) };
+      const localForSync = { members: local.members, records: local.records.map(r => { const o = Object.assign({}, r); delete o.imageData; delete o.imageThumb; return o; }) };
       const remoteClean = { members: remote.members || [], records: (remote.records || []) };
       // Merge
       const merged = gistSync.mergeData(localForSync, remoteClean);
@@ -636,7 +636,7 @@ function MedicalRecords() {
           const cfg = gistSync.getConfig();
           const remote = await gistSync.pull(cfg.token, cfg.gistId);
           const local = data || { members: [], records: [] };
-          const localForSync = { members: local.members, records: (local.records || []).map(({ imageData, imageThumb, ...rest }) => rest) };
+          const localForSync = { members: local.members, records: (local.records || []).map(r => { const o = Object.assign({}, r); delete o.imageData; delete o.imageThumb; return o; }) };
           const merged = gistSync.mergeData(localForSync, { members: remote.members || [], records: remote.records || [] });
           // Restore local images
           const localImageMap = new Map();
@@ -670,7 +670,7 @@ function MedicalRecords() {
       saveTimerRef.current = setTimeout(async () => {
         try {
           const cfg = gistSync.getConfig();
-          const pushData = { members, records: records.map(({ imageData, imageThumb, ...rest }) => rest) };
+          const pushData = { members, records: records.map(r => { const o = Object.assign({}, r); delete o.imageData; delete o.imageThumb; return o; }) };
           await gistSync.push(cfg.token, cfg.gistId, pushData);
         } catch (e) { console.error("Auto push failed:", e); }
       }, 3000);
@@ -688,7 +688,7 @@ function MedicalRecords() {
   };
 
   const exportData = () => {
-    const exportRecords = records.map(({ imageData, imageThumb, ...rest }) => rest);
+    const exportRecords = records.map(r => { const o = Object.assign({}, r); delete o.imageData; delete o.imageThumb; return o; });
     const data = { members, records: exportRecords, exportedAt: new Date().toISOString() };
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
