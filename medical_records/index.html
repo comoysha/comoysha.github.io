@@ -97,19 +97,23 @@ const gistSync = {
     const memberIds = new Set(localMembers.map(m => m.id));
     const mergedMembers = [...localMembers, ...remoteMembers.filter(m => !memberIds.has(m.id))];
 
-    // Merge records: union by id, prefer newer (higher createdAt)
+    // Collect deleted IDs from both sides
+    const deletedIds = new Set([...(local.deletedIds || []), ...(remote.deletedIds || [])]);
+
+    // Merge records: union by id, prefer newer (higher createdAt), exclude deleted
     const localRecords = local.records || [];
     const remoteRecords = remote.records || [];
     const recordMap = new Map();
-    for (const r of remoteRecords) recordMap.set(r.id, r);
+    for (const r of remoteRecords) { if (!deletedIds.has(r.id)) recordMap.set(r.id, r); }
     for (const r of localRecords) {
+      if (deletedIds.has(r.id)) { recordMap.delete(r.id); continue; }
       const existing = recordMap.get(r.id);
       if (!existing || (r.createdAt || 0) >= (existing.createdAt || 0)) {
         recordMap.set(r.id, r);
       }
     }
     const mergedRecords = [...recordMap.values()].sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
-    return { members: mergedMembers, records: mergedRecords };
+    return { members: mergedMembers, records: mergedRecords, deletedIds: [...deletedIds] };
   },
 };
 
@@ -214,9 +218,62 @@ function TypeChip({ type, selected, onClick }) {
   );
 }
 
-function RecordCard({ record, members, onDelete }) {
+function EditForm({ record, members, onSave, onCancel }) {
+  const [memberId, setMemberId] = useState(record.memberId);
+  const [type, setType] = useState(record.type || "visit");
+  const [date, setDate] = useState(record.date || "");
+  const [summary, setSummary] = useState(record.summary || "");
+  const [hospital, setHospital] = useState(record.hospital || "");
+  const [diagnosis, setDiagnosis] = useState(record.diagnosis || "");
+  const [medText, setMedText] = useState((record.medications || []).map(function(m) { return m.name + (m.dosage ? "—" + m.dosage : ""); }).join("，"));
+  const [notes, setNotes] = useState(record.notes || "");
+
+  const handleSave = () => {
+    if (!summary.trim()) return;
+    const meds = medText.split(/[,，\n]/).map(function(s) { return s.trim(); }).filter(Boolean).map(function(s) {
+      var parts = s.split(/[-—]/);
+      return { name: (parts[0] || s).trim(), dosage: (parts[1] || "").trim() };
+    });
+    onSave(Object.assign({}, record, { memberId: memberId, type: type, date: date, summary: summary.trim(), hospital: hospital, diagnosis: diagnosis, medications: meds, notes: notes }));
+  };
+
+  const inputStyle = {
+    width: "100%", padding: "10px 12px", borderRadius: 10, border: "1.5px solid #e8e5e0",
+    fontSize: 14, fontFamily: "'Noto Sans SC', sans-serif", background: "#faf9f7", outline: "none", boxSizing: "border-box", transition: "border-color 0.2s",
+  };
+
+  return (
+    <div style={{ background: "#fff", borderRadius: 14, padding: 16, marginBottom: 10, boxShadow: "0 2px 12px rgba(0,0,0,0.08)" }} onClick={function(e) { e.stopPropagation(); }}>
+      <div style={{ fontSize: 14, fontWeight: 600, color: "#333", marginBottom: 12, fontFamily: "'Noto Sans SC', sans-serif" }}>编辑记录</div>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
+        {members.map(function(m) { return <MemberPill key={m.id} member={m} selected={memberId === m.id} onClick={function() { setMemberId(m.id); }} />; })}
+      </div>
+      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 10 }}>
+        {RECORD_TYPES.map(function(t) { return <TypeChip key={t.key} type={t} selected={type === t.key} onClick={function() { setType(t.key); }} />; })}
+      </div>
+      <input type="date" value={date} onChange={function(e) { setDate(e.target.value); }} style={Object.assign({}, inputStyle, { marginBottom: 8 })} />
+      <input placeholder="一句话概要 *" value={summary} onChange={function(e) { setSummary(e.target.value); }} style={Object.assign({}, inputStyle, { marginBottom: 8 })} />
+      <input placeholder="医院（选填）" value={hospital} onChange={function(e) { setHospital(e.target.value); }} style={Object.assign({}, inputStyle, { marginBottom: 8 })} />
+      <input placeholder="诊断（选填）" value={diagnosis} onChange={function(e) { setDiagnosis(e.target.value); }} style={Object.assign({}, inputStyle, { marginBottom: 8 })} />
+      <input placeholder="用药，逗号分隔（选填）" value={medText} onChange={function(e) { setMedText(e.target.value); }} style={Object.assign({}, inputStyle, { marginBottom: 8 })} />
+      <textarea placeholder="其他备注（选填）" value={notes} onChange={function(e) { setNotes(e.target.value); }} rows={2} style={Object.assign({}, inputStyle, { marginBottom: 10, resize: "vertical" })} />
+      <div style={{ display: "flex", gap: 10 }}>
+        <button onClick={onCancel} style={{ flex: 1, padding: "10px", borderRadius: 12, border: "1.5px solid #e8e5e0", background: "#fff", fontSize: 13, color: "#888", cursor: "pointer", fontFamily: "'Noto Sans SC', sans-serif" }}>取消</button>
+        <button onClick={handleSave} style={{ flex: 2, padding: "10px", borderRadius: 12, border: "none", background: summary.trim() ? "#4A7C6F" : "#ccc", color: "#fff", fontSize: 13, fontWeight: 600, cursor: summary.trim() ? "pointer" : "default", fontFamily: "'Noto Sans SC', sans-serif" }}>保存修改</button>
+      </div>
+    </div>
+  );
+}
+
+function RecordCard({ record, members, onDelete, onEdit }) {
   const [expanded, setExpanded] = useState(false);
+  const [editing, setEditing] = useState(false);
   const member = members.find((m) => m.id === record.memberId) || members[0];
+
+  if (editing) {
+    return <EditForm record={record} members={members} onSave={function(updated) { onEdit(updated); setEditing(false); }} onCancel={function() { setEditing(false); }} />;
+  }
+
   return (
     <div style={{
       background: "#fff", borderRadius: 14, padding: "14px 16px", marginBottom: 10,
@@ -247,10 +304,16 @@ function RecordCard({ record, members, onDelete }) {
           ))}</div>}
           {record.notes && <div style={{ fontSize: 12, color: "#888", marginTop: 4, fontFamily: "'Noto Sans SC', sans-serif" }}>{record.notes}</div>}
           {record.imageData && <img src={record.imageData} alt="原图" style={{ width: "100%", borderRadius: 8, marginTop: 8 }} />}
-          <button onClick={(e) => { e.stopPropagation(); if (confirm("确定删除这条记录？")) onDelete(record.id); }} style={{
-            marginTop: 10, padding: "4px 12px", fontSize: 12, color: "#c06b5d", background: "#c06b5d15",
-            border: "none", borderRadius: 8, cursor: "pointer", fontFamily: "'Noto Sans SC', sans-serif",
-          }}>删除记录</button>
+          <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+            <button onClick={(e) => { e.stopPropagation(); setEditing(true); }} style={{
+              padding: "4px 12px", fontSize: 12, color: "#4A7C6F", background: "#4A7C6F15",
+              border: "none", borderRadius: 8, cursor: "pointer", fontFamily: "'Noto Sans SC', sans-serif",
+            }}>编辑</button>
+            <button onClick={(e) => { e.stopPropagation(); if (confirm("确定删除这条记录？")) onDelete(record.id); }} style={{
+              padding: "4px 12px", fontSize: 12, color: "#c06b5d", background: "#c06b5d15",
+              border: "none", borderRadius: 8, cursor: "pointer", fontFamily: "'Noto Sans SC', sans-serif",
+            }}>删除</button>
+          </div>
         </div>
       )}
     </div>
@@ -504,6 +567,9 @@ function SyncSettingsModal({ onClose, onSyncDone, aiConfig }) {
 
   const handleSync = async () => {
     if (!token || !gistId) { setMsg("请先完成配置"); return; }
+    // Auto save config before syncing
+    gistSync.saveConfig({ token, gistId });
+    setConfig({ token, gistId });
     setStatus("syncing"); setMsg("正在同步...");
     try {
       // Pull remote
@@ -511,8 +577,9 @@ function SyncSettingsModal({ onClose, onSyncDone, aiConfig }) {
       // Load local
       const local = await storage.load() || { members: [], records: [] };
       // Strip images from records before pushing
-      const localForSync = { members: local.members, records: local.records.map(r => { const o = Object.assign({}, r); delete o.imageData; delete o.imageThumb; return o; }) };
-      const remoteClean = { members: remote.members || [], records: (remote.records || []) };
+      const localDeleted = JSON.parse(localStorage.getItem("deleted-record-ids") || "[]");
+      const localForSync = { members: local.members, records: local.records.map(r => { const o = Object.assign({}, r); delete o.imageData; delete o.imageThumb; return o; }), deletedIds: localDeleted };
+      const remoteClean = { members: remote.members || [], records: (remote.records || []), deletedIds: remote.deletedIds || [] };
       // Merge
       const merged = gistSync.mergeData(localForSync, remoteClean);
       // Determine aiConfig to push: prefer local if it has values, otherwise use remote
@@ -531,6 +598,7 @@ function SyncSettingsModal({ onClose, onSyncDone, aiConfig }) {
       // Save locally
       const finalData = { members: merged.members, records: finalRecords };
       await storage.save(finalData);
+      localStorage.setItem("deleted-record-ids", JSON.stringify(merged.deletedIds || []));
       // Restore aiConfig from remote if local is empty
       if (!localAi && remoteAi && remoteAi.apiKey) {
         localStorage.setItem("volcengine-config", JSON.stringify(remoteAi));
@@ -627,6 +695,7 @@ function SettingsModal({ aiConfig, onSave, onClose }) {
 function MedicalRecords() {
   const [members, setMembers] = useState(DEFAULT_MEMBERS);
   const [records, setRecords] = useState([]);
+  const [deletedIds, setDeletedIds] = useState([]);
   const [filterMember, setFilterMember] = useState("all");
   const [mode, setMode] = useState("list");
   const [loaded, setLoaded] = useState(false);
@@ -652,8 +721,9 @@ function MedicalRecords() {
           const cfg = gistSync.getConfig();
           const remote = await gistSync.pull(cfg.token, cfg.gistId);
           const local = data || { members: [], records: [] };
-          const localForSync = { members: local.members, records: (local.records || []).map(r => { const o = Object.assign({}, r); delete o.imageData; delete o.imageThumb; return o; }) };
-          const merged = gistSync.mergeData(localForSync, { members: remote.members || [], records: remote.records || [] });
+          const localDeleted = JSON.parse(localStorage.getItem("deleted-record-ids") || "[]");
+          const localForSync = { members: local.members, records: (local.records || []).map(r => { const o = Object.assign({}, r); delete o.imageData; delete o.imageThumb; return o; }), deletedIds: localDeleted };
+          const merged = gistSync.mergeData(localForSync, { members: remote.members || [], records: remote.records || [], deletedIds: remote.deletedIds || [] });
           // Restore local images
           const localImageMap = new Map();
           (local.records || []).forEach(r => { if (r.imageData) localImageMap.set(r.id, { imageData: r.imageData, imageThumb: r.imageThumb }); });
@@ -663,6 +733,8 @@ function MedicalRecords() {
           });
           setMembers(merged.members);
           setRecords(finalRecords);
+          setDeletedIds(merged.deletedIds || []);
+          localStorage.setItem("deleted-record-ids", JSON.stringify(merged.deletedIds || []));
           await storage.save({ members: merged.members, records: finalRecords });
           // Restore aiConfig from Gist if local is empty
           if (remote.aiConfig && remote.aiConfig.apiKey) {
@@ -683,31 +755,52 @@ function MedicalRecords() {
     });
   }, []);
 
-  // Save to localStorage + auto push to Gist
-  const saveTimerRef = useRef(null);
-  const pushingRef = useRef(false);
+  // Save to localStorage
   useEffect(() => {
-    if (!loaded) return;
-    storage.save({ members, records });
-    // Debounced push to Gist
-    if (gistSync.isConfigured()) {
-      clearTimeout(saveTimerRef.current);
-      saveTimerRef.current = setTimeout(async () => {
-        if (pushingRef.current) return; // skip if already pushing
-        pushingRef.current = true;
-        try {
-          const cfg = gistSync.getConfig();
-          const pushData = { members, records: records.map(r => { const o = Object.assign({}, r); delete o.imageData; delete o.imageThumb; return o; }) };
-          const currentAi = JSON.parse(localStorage.getItem("volcengine-config") || "{}");
-          await gistSync.push(cfg.token, cfg.gistId, pushData, currentAi);
-        } catch (e) { console.error("Auto push failed:", e); }
-        pushingRef.current = false;
-      }, 5000);
-    }
+    if (loaded) storage.save({ members, records });
   }, [members, records, loaded]);
 
-  const addRecord = useCallback((record) => { setRecords((prev) => [record, ...prev]); setMode("list"); }, []);
-  const deleteRecord = useCallback((id) => { setRecords((prev) => prev.filter((r) => r.id !== id)); }, []);
+  // Immediate push to Gist
+  const pushNow = useCallback(function(newMembers, newRecords, newDeletedIds) {
+    if (!gistSync.isConfigured()) return;
+    var m = newMembers || members;
+    var r = newRecords || records;
+    var d = newDeletedIds || JSON.parse(localStorage.getItem("deleted-record-ids") || "[]");
+    var cfg = gistSync.getConfig();
+    var pushData = { members: m, records: r.map(function(rec) { var o = Object.assign({}, rec); delete o.imageData; delete o.imageThumb; return o; }), deletedIds: d };
+    var currentAi = JSON.parse(localStorage.getItem("volcengine-config") || "{}");
+    gistSync.push(cfg.token, cfg.gistId, pushData, currentAi).catch(function(e) { console.error("Push failed:", e); });
+  }, [members, records]);
+
+  const addRecord = useCallback((record) => {
+    setRecords((prev) => {
+      const next = [record, ...prev];
+      setTimeout(function() { pushNow(null, next); }, 100);
+      return next;
+    });
+    setMode("list");
+  }, [pushNow]);
+
+  const deleteRecord = useCallback((id) => {
+    setDeletedIds(function(prevDel) {
+      const nextDel = prevDel.indexOf(id) === -1 ? prevDel.concat([id]) : prevDel;
+      localStorage.setItem("deleted-record-ids", JSON.stringify(nextDel));
+      setRecords(function(prev) {
+        const next = prev.filter(function(r) { return r.id !== id; });
+        setTimeout(function() { pushNow(null, next, nextDel); }, 100);
+        return next;
+      });
+      return nextDel;
+    });
+  }, [pushNow]);
+
+  const editRecord = useCallback((updated) => {
+    setRecords((prev) => {
+      const next = prev.map(function(r) { return r.id === updated.id ? Object.assign({}, r, updated) : r; });
+      setTimeout(function() { pushNow(null, next); }, 100);
+      return next;
+    });
+  }, [pushNow]);
 
   const saveAiConfig = (cfg) => { setAiConfig(cfg); localStorage.setItem("volcengine-config", JSON.stringify(cfg)); };
 
@@ -795,7 +888,7 @@ function MedicalRecords() {
               Object.entries(groups).map(([month, recs]) => (
                 <div key={month} style={{ marginBottom: 20 }}>
                   <div style={{ fontSize: 12, fontWeight: 600, color: "#aaa", marginBottom: 8, paddingLeft: 2, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 1 }}>{month}</div>
-                  {recs.map((r) => <RecordCard key={r.id} record={r} members={members} onDelete={deleteRecord} />)}
+                  {recs.map((r) => <RecordCard key={r.id} record={r} members={members} onDelete={deleteRecord} onEdit={editRecord} />)}
                 </div>
               ))
             )}
