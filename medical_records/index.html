@@ -50,31 +50,56 @@ const RECORD_TYPES = [
 
 const createId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
 
+const PROMPT_TEXT = `这是一张医疗相关的单据/报告照片。请提取关键信息，用JSON格式返回，不要包含markdown标记或其他文字。格式：
+{"date":"YYYY-MM-DD或空字符串","hospital":"医院名或空","doctor":"医生名或空","diagnosis":"诊断或空","medications":[{"name":"药名","dosage":"用法用量"}],"tests":[{"name":"检查项","result":"结果"}],"summary":"一句话摘要","type":"visit|medication|test|symptom|note"}
+如果某项信息不存在就用空字符串或空数组。`;
+
 async function extractFromImage(base64Data, mediaType, config) {
   try {
-    const url = config.url.replace(/\/$/, "") + "/chat/completions";
-    const response = await fetch(url, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": "Bearer " + config.apiKey,
-      },
-      body: JSON.stringify({
+    const baseUrl = config.url.replace(/\/$/, "");
+    const apiType = config.apiType || "responses";
+    let url, body;
+
+    if (apiType === "responses") {
+      url = baseUrl + "/responses";
+      body = {
+        model: config.endpoint,
+        input: [{
+          role: "user",
+          content: [
+            { type: "input_image", image_url: `data:${mediaType};base64,${base64Data}` },
+            { type: "input_text", text: PROMPT_TEXT },
+          ],
+        }],
+      };
+    } else {
+      url = baseUrl + "/chat/completions";
+      body = {
         model: config.endpoint,
         max_tokens: 1000,
         messages: [{
           role: "user",
           content: [
             { type: "image_url", image_url: { url: `data:${mediaType};base64,${base64Data}` } },
-            { type: "text", text: `这是一张医疗相关的单据/报告照片。请提取关键信息，用JSON格式返回，不要包含markdown标记或其他文字。格式：
-{"date":"YYYY-MM-DD或空字符串","hospital":"医院名或空","doctor":"医生名或空","diagnosis":"诊断或空","medications":[{"name":"药名","dosage":"用法用量"}],"tests":[{"name":"检查项","result":"结果"}],"summary":"一句话摘要","type":"visit|medication|test|symptom|note"}
-如果某项信息不存在就用空字符串或空数组。` },
+            { type: "text", text: PROMPT_TEXT },
           ],
         }],
-      }),
+      };
+    }
+
+    const response = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Authorization": "Bearer " + config.apiKey },
+      body: JSON.stringify(body),
     });
     const data = await response.json();
-    const text = data.choices?.[0]?.message?.content || "";
+
+    let text = "";
+    if (apiType === "responses") {
+      text = (data.output || []).filter(o => o.type === "message").flatMap(o => (o.content || []).filter(c => c.type === "output_text").map(c => c.text)).join("") || "";
+    } else {
+      text = data.choices?.[0]?.message?.content || "";
+    }
     const clean = text.replace(/```json|```/g, "").trim();
     return JSON.parse(clean);
   } catch (e) {
@@ -366,27 +391,38 @@ function MemberManager({ members, onUpdate }) {
 }
 
 function SettingsModal({ aiConfig, onSave, onClose }) {
-  const [url, setUrl] = useState(aiConfig.url || "");
+  const [url, setUrl] = useState(aiConfig.url || "https://ark.cn-beijing.volces.com/api/v3");
   const [apiKey, setApiKey] = useState(aiConfig.apiKey || "");
   const [endpoint, setEndpoint] = useState(aiConfig.endpoint || "");
+  const [apiType, setApiType] = useState(aiConfig.apiType || "responses");
   const inputStyle = {
     width: "100%", padding: "10px 12px", borderRadius: 10, border: "1.5px solid #e8e5e0",
     fontSize: 13, fontFamily: "'JetBrains Mono', monospace", background: "#faf9f7", outline: "none", boxSizing: "border-box", marginBottom: 10,
   };
+  const tabStyle = (active) => ({
+    flex: 1, padding: "8px 0", borderRadius: 8, border: "none", fontSize: 13, fontWeight: 500,
+    cursor: "pointer", fontFamily: "'Noto Sans SC', sans-serif", transition: "all 0.15s",
+    background: active ? "#4A7C6F" : "#f0ede8", color: active ? "#fff" : "#888",
+  });
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", zIndex: 100, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }} onClick={onClose}>
       <div style={{ background: "#fff", borderRadius: 16, padding: 24, maxWidth: 400, width: "100%" }} onClick={(e) => e.stopPropagation()}>
         <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 8, fontFamily: "'Noto Sans SC', sans-serif" }}>火山引擎配置</div>
-        <div style={{ fontSize: 12, color: "#888", marginBottom: 16, fontFamily: "'Noto Sans SC', sans-serif" }}>拍照识别功能需要配置火山引擎 API，所有信息仅保存在本地浏览器中。</div>
-        <div style={{ fontSize: 12, color: "#666", marginBottom: 4, fontFamily: "'Noto Sans SC', sans-serif" }}>API URL</div>
+        <div style={{ fontSize: 12, color: "#888", marginBottom: 14, fontFamily: "'Noto Sans SC', sans-serif" }}>拍照识别功能需要配置火山引擎 API，所有信息仅保存在本地浏览器中。</div>
+        <div style={{ fontSize: 12, color: "#666", marginBottom: 4, fontFamily: "'Noto Sans SC', sans-serif" }}>API 类型</div>
+        <div style={{ display: "flex", gap: 6, marginBottom: 10, background: "#f0ede8", borderRadius: 10, padding: 3 }}>
+          <button onClick={() => setApiType("responses")} style={tabStyle(apiType === "responses")}>Responses API</button>
+          <button onClick={() => setApiType("chat")} style={tabStyle(apiType === "chat")}>Chat API</button>
+        </div>
+        <div style={{ fontSize: 12, color: "#666", marginBottom: 4, fontFamily: "'Noto Sans SC', sans-serif" }}>API URL（基础地址，不含 /responses 或 /chat/completions）</div>
         <input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://ark.cn-beijing.volces.com/api/v3" style={inputStyle} />
         <div style={{ fontSize: 12, color: "#666", marginBottom: 4, fontFamily: "'Noto Sans SC', sans-serif" }}>API Key</div>
         <input value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder="输入你的 API Key" type="password" style={inputStyle} />
-        <div style={{ fontSize: 12, color: "#666", marginBottom: 4, fontFamily: "'Noto Sans SC', sans-serif" }}>Endpoint (模型接入点)</div>
+        <div style={{ fontSize: 12, color: "#666", marginBottom: 4, fontFamily: "'Noto Sans SC', sans-serif" }}>Endpoint（模型接入点）</div>
         <input value={endpoint} onChange={(e) => setEndpoint(e.target.value)} placeholder="如 ep-20240xxx-xxxxx" style={inputStyle} />
         <div style={{ display: "flex", gap: 10, marginTop: 6 }}>
           <button onClick={onClose} style={{ flex: 1, padding: "10px", borderRadius: 12, border: "1.5px solid #e8e5e0", background: "#fff", fontSize: 14, color: "#888", cursor: "pointer", fontFamily: "'Noto Sans SC', sans-serif" }}>取消</button>
-          <button onClick={() => { onSave({ url, apiKey, endpoint }); onClose(); }} style={{ flex: 1, padding: "10px", borderRadius: 12, border: "none", background: "#4A7C6F", color: "#fff", fontSize: 14, fontWeight: 600, cursor: "pointer", fontFamily: "'Noto Sans SC', sans-serif" }}>保存</button>
+          <button onClick={() => { onSave({ url, apiKey, endpoint, apiType }); onClose(); }} style={{ flex: 1, padding: "10px", borderRadius: 12, border: "none", background: "#4A7C6F", color: "#fff", fontSize: 14, fontWeight: 600, cursor: "pointer", fontFamily: "'Noto Sans SC', sans-serif" }}>保存</button>
         </div>
       </div>
     </div>
