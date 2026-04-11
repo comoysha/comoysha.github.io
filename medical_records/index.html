@@ -802,6 +802,45 @@ function MedicalRecords() {
     });
   }, [pushNow]);
 
+  // Quick sync: pull remote, merge, push back
+  const quickSync = useCallback(async function() {
+    if (!gistSync.isConfigured()) { setShowSync(true); return; }
+    setSyncStatus("syncing");
+    try {
+      var cfg = gistSync.getConfig();
+      var remote = await gistSync.pull(cfg.token, cfg.gistId);
+      var local = await storage.load() || { members: [], records: [] };
+      var localDeleted = JSON.parse(localStorage.getItem("deleted-record-ids") || "[]");
+      var localForSync = { members: local.members, records: (local.records || []).map(function(r) { var o = Object.assign({}, r); delete o.imageData; delete o.imageThumb; return o; }), deletedIds: localDeleted };
+      var remoteClean = { members: remote.members || [], records: remote.records || [], deletedIds: remote.deletedIds || [] };
+      var merged = gistSync.mergeData(localForSync, remoteClean);
+      // Push
+      var currentAi = JSON.parse(localStorage.getItem("volcengine-config") || "{}");
+      var mergedAi = (currentAi && currentAi.apiKey) ? currentAi : (remote.aiConfig || {});
+      await gistSync.push(cfg.token, cfg.gistId, merged, mergedAi);
+      // Restore local images
+      var localImageMap = new Map();
+      (local.records || []).forEach(function(r) { if (r.imageData) localImageMap.set(r.id, { imageData: r.imageData, imageThumb: r.imageThumb }); });
+      var finalRecords = merged.records.map(function(r) { var imgs = localImageMap.get(r.id); return imgs ? Object.assign({}, r, imgs) : r; });
+      setMembers(merged.members);
+      setRecords(finalRecords);
+      setDeletedIds(merged.deletedIds || []);
+      localStorage.setItem("deleted-record-ids", JSON.stringify(merged.deletedIds || []));
+      await storage.save({ members: merged.members, records: finalRecords });
+      // Restore aiConfig
+      if (!currentAi.apiKey && remote.aiConfig && remote.aiConfig.apiKey) {
+        setAiConfig(remote.aiConfig);
+        localStorage.setItem("volcengine-config", JSON.stringify(remote.aiConfig));
+      }
+      setSyncStatus("done");
+      setTimeout(function() { setSyncStatus(""); }, 2000);
+    } catch (e) {
+      console.error("Quick sync failed:", e);
+      setSyncStatus("error");
+      setTimeout(function() { setSyncStatus(""); }, 3000);
+    }
+  }, []);
+
   const saveAiConfig = (cfg) => { setAiConfig(cfg); localStorage.setItem("volcengine-config", JSON.stringify(cfg)); };
 
   const handleSyncDone = (data, restoredAiConfig) => {
@@ -908,6 +947,15 @@ function MedicalRecords() {
             fontSize: 24, cursor: "pointer", boxShadow: "0 4px 16px rgba(91,127,165,0.4)",
             display: "flex", alignItems: "center", justifyContent: "center", transition: "transform 0.15s",
           }} onMouseDown={(e) => (e.currentTarget.style.transform = "scale(0.92)")} onMouseUp={(e) => (e.currentTarget.style.transform = "scale(1)")}>✏️</button>
+          <button onClick={quickSync} disabled={syncStatus === "syncing"} style={{
+            width: 56, height: 56, borderRadius: "50%", border: "none",
+            background: syncStatus === "syncing" ? "#aaa" : syncStatus === "done" ? "#4A9C6F" : syncStatus === "error" ? "#C06B5D" : "#8B7BA5",
+            color: "#fff", fontSize: 24, cursor: syncStatus === "syncing" ? "default" : "pointer",
+            boxShadow: "0 4px 16px rgba(139,123,165,0.4)",
+            display: "flex", alignItems: "center", justifyContent: "center", transition: "all 0.15s",
+          }} onMouseDown={(e) => (e.currentTarget.style.transform = "scale(0.92)")} onMouseUp={(e) => (e.currentTarget.style.transform = "scale(1)")}>
+            {syncStatus === "syncing" ? <span style={{ display: "inline-block", width: 24, height: 24, border: "3px solid rgba(255,255,255,0.3)", borderTopColor: "#fff", borderRadius: "50%", animation: "spin 0.8s linear infinite" }} /> : "🔄"}
+          </button>
         </div>
       )}
     </div>
