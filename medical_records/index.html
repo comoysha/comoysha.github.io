@@ -20,6 +20,8 @@ body { background: #F5F3F0; font-family: 'Noto Sans SC', sans-serif; }
 const { useState, useEffect, useRef, useCallback } = React;
 
 const STORAGE_KEY = "family-medical-records";
+const GIST_CONFIG_KEY = "gist-sync-config";
+const GIST_FILENAME = "medical-records.json";
 
 const storage = {
   async load() {
@@ -31,6 +33,75 @@ const storage = {
   async save(data) {
     try { localStorage.setItem(STORAGE_KEY, JSON.stringify(data)); }
     catch (e) { console.error("Storage save failed:", e); }
+  },
+};
+
+// ============ GitHub Gist Sync ============
+const gistSync = {
+  getConfig() {
+    try { return JSON.parse(localStorage.getItem(GIST_CONFIG_KEY) || "{}"); } catch { return {}; }
+  },
+  saveConfig(cfg) { localStorage.setItem(GIST_CONFIG_KEY, JSON.stringify(cfg)); },
+  isConfigured() { const c = this.getConfig(); return !!(c.token); },
+
+  async createGist(token) {
+    const resp = await fetch("https://api.github.com/gists", {
+      method: "POST",
+      headers: { "Authorization": "token " + token, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        description: "家庭诊疗记录数据",
+        public: false,
+        files: { [GIST_FILENAME]: { content: JSON.stringify({ members: [], records: [], syncedAt: new Date().toISOString() }) } },
+      }),
+    });
+    if (!resp.ok) throw new Error("创建 Gist 失败: " + resp.status);
+    const data = await resp.json();
+    return data.id;
+  },
+
+  async pull(token, gistId) {
+    const resp = await fetch("https://api.github.com/gists/" + gistId, {
+      headers: { "Authorization": "token " + token },
+    });
+    if (!resp.ok) throw new Error("拉取失败: " + resp.status);
+    const data = await resp.json();
+    const file = data.files?.[GIST_FILENAME];
+    if (!file) throw new Error("Gist 中没有找到数据文件");
+    return JSON.parse(file.content);
+  },
+
+  async push(token, gistId, data) {
+    const resp = await fetch("https://api.github.com/gists/" + gistId, {
+      method: "PATCH",
+      headers: { "Authorization": "token " + token, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        files: { [GIST_FILENAME]: { content: JSON.stringify({ ...data, syncedAt: new Date().toISOString() }) } },
+      }),
+    });
+    if (!resp.ok) throw new Error("推送失败: " + resp.status);
+    return true;
+  },
+
+  mergeData(local, remote) {
+    // Merge members: use local as base, add any remote-only members
+    const localMembers = local.members || [];
+    const remoteMembers = remote.members || [];
+    const memberIds = new Set(localMembers.map(m => m.id));
+    const mergedMembers = [...localMembers, ...remoteMembers.filter(m => !memberIds.has(m.id))];
+
+    // Merge records: union by id, prefer newer (higher createdAt)
+    const localRecords = local.records || [];
+    const remoteRecords = remote.records || [];
+    const recordMap = new Map();
+    for (const r of remoteRecords) recordMap.set(r.id, r);
+    for (const r of localRecords) {
+      const existing = recordMap.get(r.id);
+      if (!existing || (r.createdAt || 0) >= (existing.createdAt || 0)) {
+        recordMap.set(r.id, r);
+      }
+    }
+    const mergedRecords = [...recordMap.values()].sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+    return { members: mergedMembers, records: mergedRecords };
   },
 };
 
@@ -390,6 +461,114 @@ function MemberManager({ members, onUpdate }) {
   );
 }
 
+function SyncSettingsModal({ onClose, onSyncDone }) {
+  const [config, setConfig] = useState(gistSync.getConfig());
+  const [token, setToken] = useState(config.token || "");
+  const [gistId, setGistId] = useState(config.gistId || "");
+  const [status, setStatus] = useState("idle"); // idle | syncing | success | error
+  const [msg, setMsg] = useState("");
+
+  const inputStyle = {
+    width: "100%", padding: "10px 12px", borderRadius: 10, border: "1.5px solid #e8e5e0",
+    fontSize: 13, fontFamily: "'JetBrains Mono', monospace", background: "#faf9f7", outline: "none", boxSizing: "border-box", marginBottom: 10,
+  };
+
+  const handleSave = () => {
+    gistSync.saveConfig({ token, gistId });
+    setConfig({ token, gistId });
+    setMsg("配置已保存");
+    setTimeout(() => setMsg(""), 2000);
+  };
+
+  const handleInitGist = async () => {
+    if (!token) { setMsg("请先填写 GitHub Token"); return; }
+    setStatus("syncing"); setMsg("正在创建 Gist...");
+    try {
+      const newId = await gistSync.createGist(token);
+      setGistId(newId);
+      gistSync.saveConfig({ token, gistId: newId });
+      setConfig({ token, gistId: newId });
+      setStatus("success"); setMsg("Gist 创建成功！ID: " + newId);
+    } catch (e) {
+      setStatus("error"); setMsg(e.message);
+    }
+  };
+
+  const handleSync = async () => {
+    if (!token || !gistId) { setMsg("请先完成配置"); return; }
+    setStatus("syncing"); setMsg("正在同步...");
+    try {
+      // Pull remote
+      const remote = await gistSync.pull(token, gistId);
+      // Load local
+      const local = await storage.load() || { members: [], records: [] };
+      // Strip images from records before pushing (keep local images in localStorage)
+      const localForSync = { members: local.members, records: local.records.map(({ imageData, imageThumb, ...rest }) => rest) };
+      const remoteClean = { members: remote.members || [], records: (remote.records || []) };
+      // Merge
+      const merged = gistSync.mergeData(localForSync, remoteClean);
+      // Push merged to Gist
+      await gistSync.push(token, gistId, merged);
+      // Restore local images to merged records
+      const localImageMap = new Map();
+      (local.records || []).forEach(r => { if (r.imageData) localImageMap.set(r.id, { imageData: r.imageData, imageThumb: r.imageThumb }); });
+      const finalRecords = merged.records.map(r => {
+        const imgs = localImageMap.get(r.id);
+        return imgs ? { ...r, ...imgs } : r;
+      });
+      // Save locally
+      const finalData = { members: merged.members, records: finalRecords };
+      await storage.save(finalData);
+      setStatus("success"); setMsg(`同步完成！共 ${merged.records.length} 条记录`);
+      if (onSyncDone) onSyncDone(finalData);
+    } catch (e) {
+      setStatus("error"); setMsg(e.message);
+    }
+  };
+
+  const isConfigured = token && gistId;
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", zIndex: 100, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }} onClick={onClose}>
+      <div style={{ background: "#fff", borderRadius: 16, padding: 24, maxWidth: 400, width: "100%" }} onClick={(e) => e.stopPropagation()}>
+        <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 8, fontFamily: "'Noto Sans SC', sans-serif" }}>云同步设置</div>
+        <div style={{ fontSize: 12, color: "#888", marginBottom: 14, fontFamily: "'Noto Sans SC', sans-serif", lineHeight: 1.6 }}>
+          通过 GitHub Gist 实现跨设备同步。需要一个 GitHub Personal Access Token（仅勾选 gist 权限）。
+          <a href="https://github.com/settings/tokens/new?scopes=gist&description=medical-records-sync" target="_blank" rel="noopener" style={{ color: "#4A7C6F", marginLeft: 4 }}>去创建 Token</a>
+        </div>
+
+        <div style={{ fontSize: 12, color: "#666", marginBottom: 4, fontFamily: "'Noto Sans SC', sans-serif" }}>GitHub Token</div>
+        <input value={token} onChange={(e) => setToken(e.target.value)} placeholder="ghp_xxxxxxxxxxxx" type="password" style={inputStyle} />
+
+        <div style={{ fontSize: 12, color: "#666", marginBottom: 4, fontFamily: "'Noto Sans SC', sans-serif" }}>Gist ID {!gistId && <span style={{ color: "#bbb" }}>（首次使用点击下方"创建"）</span>}</div>
+        <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
+          <input value={gistId} onChange={(e) => setGistId(e.target.value)} placeholder="自动生成或手动填写" style={{ ...inputStyle, flex: 1, marginBottom: 0 }} />
+          {!gistId && <button onClick={handleInitGist} disabled={status === "syncing"} style={{
+            padding: "8px 14px", borderRadius: 10, border: "none", background: token ? "#4A7C6F" : "#ddd",
+            color: "#fff", fontSize: 12, cursor: token ? "pointer" : "default", whiteSpace: "nowrap", fontFamily: "'Noto Sans SC', sans-serif",
+          }}>创建</button>}
+        </div>
+
+        {msg && <div style={{
+          fontSize: 12, padding: "8px 12px", borderRadius: 8, marginBottom: 10, fontFamily: "'Noto Sans SC', sans-serif",
+          background: status === "error" ? "#fef2f0" : status === "success" ? "#f0f7f4" : "#f5f3f0",
+          color: status === "error" ? "#c06b5d" : status === "success" ? "#4A7C6F" : "#888",
+        }}>{status === "syncing" && <span style={{ display: "inline-block", width: 12, height: 12, border: "2px solid #e8e5e0", borderTopColor: "#4A7C6F", borderRadius: "50%", animation: "spin 0.8s linear infinite", verticalAlign: "middle", marginRight: 6 }} />}{msg}</div>}
+
+        <div style={{ display: "flex", gap: 10 }}>
+          <button onClick={onClose} style={{ flex: 1, padding: "10px", borderRadius: 12, border: "1.5px solid #e8e5e0", background: "#fff", fontSize: 14, color: "#888", cursor: "pointer", fontFamily: "'Noto Sans SC', sans-serif" }}>关闭</button>
+          <button onClick={handleSave} style={{ flex: 1, padding: "10px", borderRadius: 12, border: "1.5px solid #e8e5e0", background: "#fff", fontSize: 14, color: "#4A7C6F", fontWeight: 600, cursor: "pointer", fontFamily: "'Noto Sans SC', sans-serif" }}>保存配置</button>
+          {isConfigured && <button onClick={handleSync} disabled={status === "syncing"} style={{
+            flex: 1, padding: "10px", borderRadius: 12, border: "none",
+            background: status === "syncing" ? "#aaa" : "#4A7C6F", color: "#fff", fontSize: 14, fontWeight: 600,
+            cursor: status === "syncing" ? "default" : "pointer", fontFamily: "'Noto Sans SC', sans-serif",
+          }}>同步</button>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function SettingsModal({ aiConfig, onSave, onClose }) {
   const [url, setUrl] = useState(aiConfig.url || "https://ark.cn-beijing.volces.com/api/v3");
   const [apiKey, setApiKey] = useState(aiConfig.apiKey || "");
@@ -439,23 +618,74 @@ function MedicalRecords() {
     try { return JSON.parse(localStorage.getItem("volcengine-config") || "{}"); } catch { return {}; }
   });
   const [showSettings, setShowSettings] = useState(false);
+  const [showSync, setShowSync] = useState(false);
+  const [syncStatus, setSyncStatus] = useState(""); // "" | "syncing" | "done" | "error"
 
+  // Auto-sync on load
   useEffect(() => {
-    storage.load().then((data) => {
+    storage.load().then(async (data) => {
       if (data) {
         if (data.members?.length) setMembers(data.members);
         if (data.records?.length) setRecords(data.records);
       }
       setLoaded(true);
+      // Auto pull from Gist if configured
+      if (gistSync.isConfigured()) {
+        try {
+          setSyncStatus("syncing");
+          const cfg = gistSync.getConfig();
+          const remote = await gistSync.pull(cfg.token, cfg.gistId);
+          const local = data || { members: [], records: [] };
+          const localForSync = { members: local.members, records: (local.records || []).map(({ imageData, imageThumb, ...rest }) => rest) };
+          const merged = gistSync.mergeData(localForSync, { members: remote.members || [], records: remote.records || [] });
+          // Restore local images
+          const localImageMap = new Map();
+          (local.records || []).forEach(r => { if (r.imageData) localImageMap.set(r.id, { imageData: r.imageData, imageThumb: r.imageThumb }); });
+          const finalRecords = merged.records.map(r => {
+            const imgs = localImageMap.get(r.id);
+            return imgs ? { ...r, ...imgs } : r;
+          });
+          setMembers(merged.members);
+          setRecords(finalRecords);
+          await storage.save({ members: merged.members, records: finalRecords });
+          setSyncStatus("done");
+          setTimeout(() => setSyncStatus(""), 2000);
+        } catch (e) {
+          console.error("Auto sync failed:", e);
+          setSyncStatus("error");
+          setTimeout(() => setSyncStatus(""), 3000);
+        }
+      }
     });
   }, []);
 
-  useEffect(() => { if (loaded) storage.save({ members, records }); }, [members, records, loaded]);
+  // Save to localStorage + auto push to Gist
+  const saveTimerRef = useRef(null);
+  useEffect(() => {
+    if (!loaded) return;
+    storage.save({ members, records });
+    // Debounced push to Gist
+    if (gistSync.isConfigured()) {
+      clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = setTimeout(async () => {
+        try {
+          const cfg = gistSync.getConfig();
+          const pushData = { members, records: records.map(({ imageData, imageThumb, ...rest }) => rest) };
+          await gistSync.push(cfg.token, cfg.gistId, pushData);
+        } catch (e) { console.error("Auto push failed:", e); }
+      }, 3000);
+    }
+  }, [members, records, loaded]);
 
   const addRecord = useCallback((record) => { setRecords((prev) => [record, ...prev]); setMode("list"); }, []);
   const deleteRecord = useCallback((id) => { setRecords((prev) => prev.filter((r) => r.id !== id)); }, []);
 
   const saveAiConfig = (cfg) => { setAiConfig(cfg); localStorage.setItem("volcengine-config", JSON.stringify(cfg)); };
+
+  const handleSyncDone = (data) => {
+    if (data.members?.length) setMembers(data.members);
+    if (data.records?.length) setRecords(data.records);
+  };
 
   const exportData = () => {
     const exportRecords = records.map(({ imageData, imageThumb, ...rest }) => rest);
@@ -475,6 +705,7 @@ function MedicalRecords() {
   return (
     <div style={{ maxWidth: 480, margin: "0 auto", minHeight: "100vh", background: "#F5F3F0", fontFamily: "'Noto Sans SC', sans-serif" }}>
       {showSettings && <SettingsModal aiConfig={aiConfig} onSave={saveAiConfig} onClose={() => setShowSettings(false)} />}
+      {showSync && <SyncSettingsModal onClose={() => setShowSync(false)} onSyncDone={handleSyncDone} />}
       <div style={{ background: "linear-gradient(135deg, #4A7C6F 0%, #3D6B5F 100%)", padding: "20px 20px 16px", position: "sticky", top: 0, zIndex: 10 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <div>
@@ -482,6 +713,15 @@ function MedicalRecords() {
             <div style={{ fontSize: 11, color: "rgba(255,255,255,0.6)", marginTop: 2 }}>{records.length} 条记录 · {members.length} 位成员</div>
           </div>
           <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <button onClick={() => setShowSync(true)} style={{
+              padding: "6px 10px", borderRadius: 10, border: "1.5px solid rgba(255,255,255,0.3)",
+              background: syncStatus === "syncing" ? "rgba(255,255,255,0.3)" : syncStatus === "done" ? "rgba(100,200,150,0.3)" : syncStatus === "error" ? "rgba(200,100,100,0.3)" : "rgba(255,255,255,0.15)",
+              fontSize: 12, color: "rgba(255,255,255,0.9)", cursor: "pointer", fontFamily: "'Noto Sans SC', sans-serif",
+              display: "flex", alignItems: "center", gap: 4,
+            }} title="云同步">
+              {syncStatus === "syncing" ? <span style={{ display: "inline-block", width: 10, height: 10, border: "1.5px solid rgba(255,255,255,0.3)", borderTopColor: "#fff", borderRadius: "50%", animation: "spin 0.8s linear infinite" }} /> : "☁️"}
+              {syncStatus === "done" ? "已同步" : syncStatus === "error" ? "失败" : "同步"}
+            </button>
             {records.length > 0 && <button onClick={exportData} style={{
               padding: "6px 10px", borderRadius: 10, border: "1.5px solid rgba(255,255,255,0.3)", background: "rgba(255,255,255,0.15)",
               fontSize: 12, color: "rgba(255,255,255,0.8)", cursor: "pointer", fontFamily: "'Noto Sans SC', sans-serif",
