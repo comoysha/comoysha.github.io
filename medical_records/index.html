@@ -70,7 +70,8 @@ const gistSync = {
     return JSON.parse(file.content);
   },
 
-  async push(token, gistId, data, aiConfig) {
+  async push(token, gistId, data, aiConfig, retries) {
+    retries = retries || 0;
     const payload = Object.assign({}, data, { syncedAt: new Date().toISOString() });
     if (aiConfig) payload.aiConfig = aiConfig;
     const resp = await fetch("https://api.github.com/gists/" + gistId, {
@@ -80,6 +81,11 @@ const gistSync = {
         files: { [GIST_FILENAME]: { content: JSON.stringify(payload) } },
       }),
     });
+    if (resp.status === 409 && retries < 2) {
+      // Conflict — wait and retry
+      await new Promise(function(r) { setTimeout(r, 1000); });
+      return this.push(token, gistId, data, aiConfig, retries + 1);
+    }
     if (!resp.ok) throw new Error("推送失败: " + resp.status);
     return true;
   },
@@ -679,6 +685,7 @@ function MedicalRecords() {
 
   // Save to localStorage + auto push to Gist
   const saveTimerRef = useRef(null);
+  const pushingRef = useRef(false);
   useEffect(() => {
     if (!loaded) return;
     storage.save({ members, records });
@@ -686,13 +693,16 @@ function MedicalRecords() {
     if (gistSync.isConfigured()) {
       clearTimeout(saveTimerRef.current);
       saveTimerRef.current = setTimeout(async () => {
+        if (pushingRef.current) return; // skip if already pushing
+        pushingRef.current = true;
         try {
           const cfg = gistSync.getConfig();
           const pushData = { members, records: records.map(r => { const o = Object.assign({}, r); delete o.imageData; delete o.imageThumb; return o; }) };
           const currentAi = JSON.parse(localStorage.getItem("volcengine-config") || "{}");
           await gistSync.push(cfg.token, cfg.gistId, pushData, currentAi);
         } catch (e) { console.error("Auto push failed:", e); }
-      }, 3000);
+        pushingRef.current = false;
+      }, 5000);
     }
   }, [members, records, loaded]);
 
