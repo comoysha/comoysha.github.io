@@ -44,14 +44,14 @@ const gistSync = {
   saveConfig(cfg) { localStorage.setItem(GIST_CONFIG_KEY, JSON.stringify(cfg)); },
   isConfigured() { const c = this.getConfig(); return !!(c.token); },
 
-  async createGist(token) {
+  async createGist(token, aiConfig) {
     const resp = await fetch("https://api.github.com/gists", {
       method: "POST",
       headers: { "Authorization": "token " + token, "Content-Type": "application/json" },
       body: JSON.stringify({
         description: "家庭诊疗记录数据",
         public: false,
-        files: { [GIST_FILENAME]: { content: JSON.stringify({ members: [], records: [], syncedAt: new Date().toISOString() }) } },
+        files: { [GIST_FILENAME]: { content: JSON.stringify({ members: [], records: [], aiConfig: aiConfig || {}, syncedAt: new Date().toISOString() }) } },
       }),
     });
     if (!resp.ok) throw new Error("创建 Gist 失败: " + resp.status);
@@ -70,12 +70,14 @@ const gistSync = {
     return JSON.parse(file.content);
   },
 
-  async push(token, gistId, data) {
+  async push(token, gistId, data, aiConfig) {
+    const payload = Object.assign({}, data, { syncedAt: new Date().toISOString() });
+    if (aiConfig) payload.aiConfig = aiConfig;
     const resp = await fetch("https://api.github.com/gists/" + gistId, {
       method: "PATCH",
       headers: { "Authorization": "token " + token, "Content-Type": "application/json" },
       body: JSON.stringify({
-        files: { [GIST_FILENAME]: { content: JSON.stringify({ ...data, syncedAt: new Date().toISOString() }) } },
+        files: { [GIST_FILENAME]: { content: JSON.stringify(payload) } },
       }),
     });
     if (!resp.ok) throw new Error("推送失败: " + resp.status);
@@ -461,7 +463,7 @@ function MemberManager({ members, onUpdate }) {
   );
 }
 
-function SyncSettingsModal({ onClose, onSyncDone }) {
+function SyncSettingsModal({ onClose, onSyncDone, aiConfig }) {
   const [config, setConfig] = useState(gistSync.getConfig());
   const [token, setToken] = useState(config.token || "");
   const [gistId, setGistId] = useState(config.gistId || "");
@@ -484,7 +486,7 @@ function SyncSettingsModal({ onClose, onSyncDone }) {
     if (!token) { setMsg("请先填写 GitHub Token"); return; }
     setStatus("syncing"); setMsg("正在创建 Gist...");
     try {
-      const newId = await gistSync.createGist(token);
+      const newId = await gistSync.createGist(token, aiConfig);
       setGistId(newId);
       gistSync.saveConfig({ token, gistId: newId });
       setConfig({ token, gistId: newId });
@@ -502,13 +504,17 @@ function SyncSettingsModal({ onClose, onSyncDone }) {
       const remote = await gistSync.pull(token, gistId);
       // Load local
       const local = await storage.load() || { members: [], records: [] };
-      // Strip images from records before pushing (keep local images in localStorage)
+      // Strip images from records before pushing
       const localForSync = { members: local.members, records: local.records.map(r => { const o = Object.assign({}, r); delete o.imageData; delete o.imageThumb; return o; }) };
       const remoteClean = { members: remote.members || [], records: (remote.records || []) };
       // Merge
       const merged = gistSync.mergeData(localForSync, remoteClean);
-      // Push merged to Gist
-      await gistSync.push(token, gistId, merged);
+      // Determine aiConfig to push: prefer local if it has values, otherwise use remote
+      const localAi = aiConfig && aiConfig.apiKey ? aiConfig : null;
+      const remoteAi = remote.aiConfig || null;
+      const mergedAi = localAi || remoteAi || {};
+      // Push merged to Gist (including aiConfig)
+      await gistSync.push(token, gistId, merged, mergedAi);
       // Restore local images to merged records
       const localImageMap = new Map();
       (local.records || []).forEach(r => { if (r.imageData) localImageMap.set(r.id, { imageData: r.imageData, imageThumb: r.imageThumb }); });
@@ -519,8 +525,12 @@ function SyncSettingsModal({ onClose, onSyncDone }) {
       // Save locally
       const finalData = { members: merged.members, records: finalRecords };
       await storage.save(finalData);
+      // Restore aiConfig from remote if local is empty
+      if (!localAi && remoteAi && remoteAi.apiKey) {
+        localStorage.setItem("volcengine-config", JSON.stringify(remoteAi));
+      }
       setStatus("success"); setMsg(`同步完成！共 ${merged.records.length} 条记录`);
-      if (onSyncDone) onSyncDone(finalData);
+      if (onSyncDone) onSyncDone(finalData, mergedAi);
     } catch (e) {
       setStatus("error"); setMsg(e.message);
     }
@@ -648,6 +658,14 @@ function MedicalRecords() {
           setMembers(merged.members);
           setRecords(finalRecords);
           await storage.save({ members: merged.members, records: finalRecords });
+          // Restore aiConfig from Gist if local is empty
+          if (remote.aiConfig && remote.aiConfig.apiKey) {
+            const localAi = JSON.parse(localStorage.getItem("volcengine-config") || "{}");
+            if (!localAi.apiKey) {
+              setAiConfig(remote.aiConfig);
+              localStorage.setItem("volcengine-config", JSON.stringify(remote.aiConfig));
+            }
+          }
           setSyncStatus("done");
           setTimeout(() => setSyncStatus(""), 2000);
         } catch (e) {
@@ -671,7 +689,8 @@ function MedicalRecords() {
         try {
           const cfg = gistSync.getConfig();
           const pushData = { members, records: records.map(r => { const o = Object.assign({}, r); delete o.imageData; delete o.imageThumb; return o; }) };
-          await gistSync.push(cfg.token, cfg.gistId, pushData);
+          const currentAi = JSON.parse(localStorage.getItem("volcengine-config") || "{}");
+          await gistSync.push(cfg.token, cfg.gistId, pushData, currentAi);
         } catch (e) { console.error("Auto push failed:", e); }
       }, 3000);
     }
@@ -682,9 +701,13 @@ function MedicalRecords() {
 
   const saveAiConfig = (cfg) => { setAiConfig(cfg); localStorage.setItem("volcengine-config", JSON.stringify(cfg)); };
 
-  const handleSyncDone = (data) => {
+  const handleSyncDone = (data, restoredAiConfig) => {
     if (data.members?.length) setMembers(data.members);
     if (data.records?.length) setRecords(data.records);
+    if (restoredAiConfig && restoredAiConfig.apiKey) {
+      setAiConfig(restoredAiConfig);
+      localStorage.setItem("volcengine-config", JSON.stringify(restoredAiConfig));
+    }
   };
 
   const exportData = () => {
@@ -705,7 +728,7 @@ function MedicalRecords() {
   return (
     <div style={{ maxWidth: 480, margin: "0 auto", minHeight: "100vh", background: "#F5F3F0", fontFamily: "'Noto Sans SC', sans-serif" }}>
       {showSettings && <SettingsModal aiConfig={aiConfig} onSave={saveAiConfig} onClose={() => setShowSettings(false)} />}
-      {showSync && <SyncSettingsModal onClose={() => setShowSync(false)} onSyncDone={handleSyncDone} />}
+      {showSync && <SyncSettingsModal onClose={() => setShowSync(false)} onSyncDone={handleSyncDone} aiConfig={aiConfig} />}
       <div style={{ background: "linear-gradient(135deg, #4A7C6F 0%, #3D6B5F 100%)", padding: "20px 20px 16px", position: "sticky", top: 0, zIndex: 10 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <div>
