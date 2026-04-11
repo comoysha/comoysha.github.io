@@ -967,7 +967,12 @@ function MedicalRecords() {
     }
   }, []);
 
-  const saveAiConfig = (cfg) => { setAiConfig(cfg); localStorage.setItem("volcengine-config", JSON.stringify(cfg)); };
+  const saveAiConfig = (cfg) => {
+    setAiConfig(cfg);
+    localStorage.setItem("volcengine-config", JSON.stringify(cfg));
+    // Push config to Gist immediately so other devices can see it
+    setTimeout(function() { pushNow(); }, 200);
+  };
 
   const handleSyncDone = (data, restoredAiConfig) => {
     if (data.members?.length) setMembers(data.members);
