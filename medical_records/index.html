@@ -1,0 +1,496 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>家庭诊疗记录</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400&display=swap" rel="stylesheet">
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+body { background: #F5F3F0; font-family: 'Noto Sans SC', sans-serif; }
+@keyframes spin { to { transform: rotate(360deg) } }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<script type="text/babel">
+const { useState, useEffect, useRef, useCallback } = React;
+
+const STORAGE_KEY = "family-medical-records";
+
+const storage = {
+  async load() {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      return raw ? JSON.parse(raw) : null;
+    } catch { return null; }
+  },
+  async save(data) {
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(data)); }
+    catch (e) { console.error("Storage save failed:", e); }
+  },
+};
+
+const DEFAULT_MEMBERS = [
+  { id: "m1", name: "我", avatar: "👤", color: "#4A7C6F" },
+  { id: "m2", name: "女儿", avatar: "👧", color: "#C06B5D" },
+  { id: "m3", name: "妻子", avatar: "👩", color: "#7B6B8D" },
+];
+
+const RECORD_TYPES = [
+  { key: "visit", label: "就诊", icon: "🏥" },
+  { key: "medication", label: "用药", icon: "💊" },
+  { key: "test", label: "检查", icon: "📋" },
+  { key: "symptom", label: "症状", icon: "🌡️" },
+  { key: "note", label: "备注", icon: "📝" },
+];
+
+const createId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+
+async function extractFromImage(base64Data, mediaType, apiKey) {
+  try {
+    const response = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": apiKey,
+        "anthropic-version": "2023-06-01",
+        "anthropic-dangerous-direct-browser-access": "true",
+      },
+      body: JSON.stringify({
+        model: "claude-sonnet-4-20250514",
+        max_tokens: 1000,
+        messages: [{
+          role: "user",
+          content: [
+            { type: "image", source: { type: "base64", media_type: mediaType, data: base64Data } },
+            { type: "text", text: `这是一张医疗相关的单据/报告照片。请提取关键信息，用JSON格式返回，不要包含markdown标记或其他文字。格式：
+{"date":"YYYY-MM-DD或空字符串","hospital":"医院名或空","doctor":"医生名或空","diagnosis":"诊断或空","medications":[{"name":"药名","dosage":"用法用量"}],"tests":[{"name":"检查项","result":"结果"}],"summary":"一句话摘要","type":"visit|medication|test|symptom|note"}
+如果某项信息不存在就用空字符串或空数组。` },
+          ],
+        }],
+      }),
+    });
+    const data = await response.json();
+    const text = data.content?.map((i) => i.text || "").join("") || "";
+    const clean = text.replace(/```json|```/g, "").trim();
+    return JSON.parse(clean);
+  } catch (e) {
+    console.error("OCR failed:", e);
+    return null;
+  }
+}
+
+function MemberPill({ member, selected, onClick }) {
+  return (
+    <button onClick={onClick} style={{
+      display: "flex", alignItems: "center", gap: 6, padding: "6px 14px",
+      borderRadius: 20, border: selected ? `2px solid ${member.color}` : "2px solid transparent",
+      background: selected ? `${member.color}18` : "#f5f3f0", fontSize: 14,
+      fontFamily: "'Noto Sans SC', sans-serif", cursor: "pointer", transition: "all 0.2s", whiteSpace: "nowrap",
+    }}>
+      <span style={{ fontSize: 16 }}>{member.avatar}</span>
+      <span style={{ color: selected ? member.color : "#666", fontWeight: selected ? 600 : 400 }}>{member.name}</span>
+    </button>
+  );
+}
+
+function TypeChip({ type, selected, onClick }) {
+  return (
+    <button onClick={onClick} style={{
+      padding: "5px 12px", borderRadius: 16, border: selected ? "2px solid #4A7C6F" : "2px solid #e8e5e0",
+      background: selected ? "#4A7C6F" : "transparent", color: selected ? "#fff" : "#888",
+      fontSize: 13, fontFamily: "'Noto Sans SC', sans-serif", cursor: "pointer", transition: "all 0.15s",
+      display: "flex", alignItems: "center", gap: 4,
+    }}>
+      <span style={{ fontSize: 13 }}>{type.icon}</span>{type.label}
+    </button>
+  );
+}
+
+function RecordCard({ record, members, onDelete }) {
+  const [expanded, setExpanded] = useState(false);
+  const member = members.find((m) => m.id === record.memberId) || members[0];
+  return (
+    <div style={{
+      background: "#fff", borderRadius: 14, padding: "14px 16px", marginBottom: 10,
+      borderLeft: `4px solid ${member.color}`, boxShadow: "0 1px 4px rgba(0,0,0,0.05)", transition: "all 0.2s",
+    }} onClick={() => setExpanded(!expanded)}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+        <div style={{ flex: 1 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
+            <span style={{ fontSize: 13 }}>{RECORD_TYPES.find((t) => t.key === record.type)?.icon || "📝"}</span>
+            <span style={{ fontSize: 12, color: member.color, fontWeight: 600, fontFamily: "'Noto Sans SC', sans-serif" }}>{member.name}</span>
+            <span style={{ fontSize: 11, color: "#aaa", fontFamily: "'JetBrains Mono', monospace" }}>{record.date || "未注明日期"}</span>
+          </div>
+          <div style={{ fontSize: 14, color: "#333", fontFamily: "'Noto Sans SC', sans-serif", lineHeight: 1.5 }}>{record.summary}</div>
+        </div>
+        {record.imageThumb && (
+          <img src={record.imageThumb} alt="" style={{ width: 44, height: 44, borderRadius: 8, objectFit: "cover", marginLeft: 10, flexShrink: 0 }} />
+        )}
+      </div>
+      {expanded && (
+        <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid #f0ede8" }}>
+          {record.hospital && <div style={{ fontSize: 13, color: "#666", marginBottom: 4, fontFamily: "'Noto Sans SC', sans-serif" }}>🏥 {record.hospital}{record.doctor && ` · ${record.doctor}`}</div>}
+          {record.diagnosis && <div style={{ fontSize: 13, color: "#666", marginBottom: 4, fontFamily: "'Noto Sans SC', sans-serif" }}>📌 {record.diagnosis}</div>}
+          {record.medications?.length > 0 && <div style={{ marginBottom: 4 }}>{record.medications.map((med, i) => (
+            <div key={i} style={{ fontSize: 12, color: "#777", fontFamily: "'Noto Sans SC', sans-serif", paddingLeft: 4 }}>💊 {med.name} {med.dosage && `— ${med.dosage}`}</div>
+          ))}</div>}
+          {record.tests?.length > 0 && <div style={{ marginBottom: 4 }}>{record.tests.map((test, i) => (
+            <div key={i} style={{ fontSize: 12, color: "#777", fontFamily: "'Noto Sans SC', sans-serif", paddingLeft: 4 }}>🔬 {test.name} {test.result && `— ${test.result}`}</div>
+          ))}</div>}
+          {record.notes && <div style={{ fontSize: 12, color: "#888", marginTop: 4, fontFamily: "'Noto Sans SC', sans-serif" }}>{record.notes}</div>}
+          {record.imageData && <img src={record.imageData} alt="原图" style={{ width: "100%", borderRadius: 8, marginTop: 8 }} />}
+          <button onClick={(e) => { e.stopPropagation(); if (confirm("确定删除这条记录？")) onDelete(record.id); }} style={{
+            marginTop: 10, padding: "4px 12px", fontSize: 12, color: "#c06b5d", background: "#c06b5d15",
+            border: "none", borderRadius: 8, cursor: "pointer", fontFamily: "'Noto Sans SC', sans-serif",
+          }}>删除记录</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function QuickForm({ members, onSave, onCancel }) {
+  const [memberId, setMemberId] = useState(members[0]?.id);
+  const [type, setType] = useState("visit");
+  const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
+  const [summary, setSummary] = useState("");
+  const [hospital, setHospital] = useState("");
+  const [diagnosis, setDiagnosis] = useState("");
+  const [medText, setMedText] = useState("");
+  const [notes, setNotes] = useState("");
+
+  const handleSave = () => {
+    if (!summary.trim()) return;
+    const meds = medText.split(/[,，\n]/).map((s) => s.trim()).filter(Boolean).map((s) => {
+      const parts = s.split(/[-—]/);
+      return { name: parts[0]?.trim() || s, dosage: parts[1]?.trim() || "" };
+    });
+    onSave({ id: createId(), memberId, type, date, summary: summary.trim(), hospital, diagnosis, medications: meds, tests: [], notes, createdAt: Date.now() });
+  };
+
+  const inputStyle = {
+    width: "100%", padding: "10px 12px", borderRadius: 10, border: "1.5px solid #e8e5e0",
+    fontSize: 14, fontFamily: "'Noto Sans SC', sans-serif", background: "#faf9f7", outline: "none", boxSizing: "border-box", transition: "border-color 0.2s",
+  };
+
+  return (
+    <div style={{ padding: "0 0 20px" }}>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 14 }}>
+        {members.map((m) => <MemberPill key={m.id} member={m} selected={memberId === m.id} onClick={() => setMemberId(m.id)} />)}
+      </div>
+      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 14 }}>
+        {RECORD_TYPES.map((t) => <TypeChip key={t.key} type={t} selected={type === t.key} onClick={() => setType(t.key)} />)}
+      </div>
+      <input type="date" value={date} onChange={(e) => setDate(e.target.value)} style={{ ...inputStyle, marginBottom: 10 }} />
+      <input placeholder="一句话概要 *（如：社区医院诊断轻度肺炎）" value={summary} onChange={(e) => setSummary(e.target.value)} style={{ ...inputStyle, marginBottom: 10 }} autoFocus />
+      <input placeholder="医院（选填）" value={hospital} onChange={(e) => setHospital(e.target.value)} style={{ ...inputStyle, marginBottom: 10 }} />
+      <input placeholder="诊断（选填）" value={diagnosis} onChange={(e) => setDiagnosis(e.target.value)} style={{ ...inputStyle, marginBottom: 10 }} />
+      <input placeholder="用药，逗号分隔（选填，如：阿奇霉素—5次点滴，顺尔宁4mg）" value={medText} onChange={(e) => setMedText(e.target.value)} style={{ ...inputStyle, marginBottom: 10 }} />
+      <textarea placeholder="其他备注（选填）" value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} style={{ ...inputStyle, marginBottom: 14, resize: "vertical" }} />
+      <div style={{ display: "flex", gap: 10 }}>
+        <button onClick={onCancel} style={{ flex: 1, padding: "12px", borderRadius: 12, border: "1.5px solid #e8e5e0", background: "#fff", fontSize: 14, color: "#888", cursor: "pointer", fontFamily: "'Noto Sans SC', sans-serif" }}>取消</button>
+        <button onClick={handleSave} style={{ flex: 2, padding: "12px", borderRadius: 12, border: "none", background: summary.trim() ? "#4A7C6F" : "#ccc", color: "#fff", fontSize: 14, fontWeight: 600, cursor: summary.trim() ? "pointer" : "default", fontFamily: "'Noto Sans SC', sans-serif", transition: "background 0.2s" }}>保存记录</button>
+      </div>
+    </div>
+  );
+}
+
+function PhotoCapture({ members, onSave, onCancel, apiKey }) {
+  const [memberId, setMemberId] = useState(members[0]?.id);
+  const [status, setStatus] = useState("idle");
+  const [extracted, setExtracted] = useState(null);
+  const [imageData, setImageData] = useState(null);
+  const [imageThumb, setImageThumb] = useState(null);
+  const fileRef = useRef();
+
+  const handleFile = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!apiKey) { alert("请先在设置中填写 Anthropic API Key"); return; }
+    setStatus("processing");
+    const fullData = await new Promise((res) => { const r = new FileReader(); r.onload = () => res(r.result); r.readAsDataURL(file); });
+    setImageData(fullData);
+    const thumb = await new Promise((res) => {
+      const img = new Image();
+      img.onload = () => { const c = document.createElement("canvas"); const s = 88 / Math.max(img.width, img.height); c.width = img.width * s; c.height = img.height * s; c.getContext("2d").drawImage(img, 0, 0, c.width, c.height); res(c.toDataURL("image/jpeg", 0.7)); };
+      img.src = fullData;
+    });
+    setImageThumb(thumb);
+    const base64 = fullData.split(",")[1];
+    const mediaType = file.type || "image/jpeg";
+    const result = await extractFromImage(base64, mediaType, apiKey);
+    if (result) { setExtracted(result); setStatus("done"); } else { setStatus("error"); }
+  };
+
+  const handleSave = () => {
+    if (!extracted) return;
+    onSave({
+      id: createId(), memberId, type: extracted.type || "visit",
+      date: extracted.date || new Date().toISOString().slice(0, 10),
+      summary: extracted.summary || "拍照记录", hospital: extracted.hospital || "",
+      doctor: extracted.doctor || "", diagnosis: extracted.diagnosis || "",
+      medications: extracted.medications || [], tests: extracted.tests || [],
+      notes: "", imageData, imageThumb, createdAt: Date.now(),
+    });
+  };
+
+  return (
+    <div style={{ padding: "0 0 20px" }}>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 14 }}>
+        {members.map((m) => <MemberPill key={m.id} member={m} selected={memberId === m.id} onClick={() => setMemberId(m.id)} />)}
+      </div>
+      {status === "idle" && (
+        <div>
+          <input ref={fileRef} type="file" accept="image/*" capture="environment" onChange={handleFile} style={{ display: "none" }} />
+          <button onClick={() => fileRef.current?.click()} style={{
+            width: "100%", padding: "40px 20px", borderRadius: 16, border: "2px dashed #d0cdc5",
+            background: "#faf9f7", cursor: "pointer", display: "flex", flexDirection: "column", alignItems: "center", gap: 8,
+          }}>
+            <span style={{ fontSize: 36 }}>📸</span>
+            <span style={{ fontSize: 14, color: "#888", fontFamily: "'Noto Sans SC', sans-serif" }}>拍照或选取单据</span>
+            <span style={{ fontSize: 12, color: "#bbb", fontFamily: "'Noto Sans SC', sans-serif" }}>AI自动识别提取信息</span>
+          </button>
+        </div>
+      )}
+      {status === "processing" && (
+        <div style={{ textAlign: "center", padding: "40px 20px", background: "#faf9f7", borderRadius: 16 }}>
+          <div style={{ width: 32, height: 32, border: "3px solid #e8e5e0", borderTopColor: "#4A7C6F", borderRadius: "50%", margin: "0 auto 12px", animation: "spin 0.8s linear infinite" }} />
+          <div style={{ fontSize: 14, color: "#888", fontFamily: "'Noto Sans SC', sans-serif" }}>AI正在识别单据内容...</div>
+        </div>
+      )}
+      {status === "error" && (
+        <div style={{ textAlign: "center", padding: "30px 20px" }}>
+          <div style={{ fontSize: 14, color: "#c06b5d", marginBottom: 12, fontFamily: "'Noto Sans SC', sans-serif" }}>识别失败，请重试或手动填写</div>
+          <button onClick={() => { setStatus("idle"); setImageData(null); }} style={{
+            padding: "8px 20px", borderRadius: 10, border: "1.5px solid #e8e5e0", background: "#fff", fontSize: 13, cursor: "pointer", fontFamily: "'Noto Sans SC', sans-serif",
+          }}>重试</button>
+        </div>
+      )}
+      {status === "done" && extracted && (
+        <div>
+          <div style={{ background: "#f0f7f4", borderRadius: 12, padding: 14, marginBottom: 14, border: "1px solid #d5e8df" }}>
+            <div style={{ fontSize: 12, color: "#4A7C6F", fontWeight: 600, marginBottom: 8, fontFamily: "'Noto Sans SC', sans-serif" }}>AI识别结果</div>
+            {extracted.date && <div style={{ fontSize: 13, color: "#555", marginBottom: 3, fontFamily: "'Noto Sans SC', sans-serif" }}>📅 {extracted.date}</div>}
+            {extracted.hospital && <div style={{ fontSize: 13, color: "#555", marginBottom: 3, fontFamily: "'Noto Sans SC', sans-serif" }}>🏥 {extracted.hospital} {extracted.doctor && `· ${extracted.doctor}`}</div>}
+            {extracted.diagnosis && <div style={{ fontSize: 13, color: "#555", marginBottom: 3, fontFamily: "'Noto Sans SC', sans-serif" }}>📌 {extracted.diagnosis}</div>}
+            {extracted.medications?.length > 0 && extracted.medications.map((m, i) => (
+              <div key={i} style={{ fontSize: 12, color: "#666", paddingLeft: 4, fontFamily: "'Noto Sans SC', sans-serif" }}>💊 {m.name} {m.dosage && `— ${m.dosage}`}</div>
+            ))}
+            {extracted.tests?.length > 0 && extracted.tests.map((t, i) => (
+              <div key={i} style={{ fontSize: 12, color: "#666", paddingLeft: 4, fontFamily: "'Noto Sans SC', sans-serif" }}>🔬 {t.name} {t.result && `— ${t.result}`}</div>
+            ))}
+            {extracted.summary && <div style={{ fontSize: 13, color: "#333", marginTop: 6, fontWeight: 500, fontFamily: "'Noto Sans SC', sans-serif" }}>{extracted.summary}</div>}
+          </div>
+          {imageThumb && <img src={imageData} alt="" style={{ width: "100%", borderRadius: 10, marginBottom: 14 }} />}
+          <div style={{ display: "flex", gap: 10 }}>
+            <button onClick={() => { setStatus("idle"); setExtracted(null); setImageData(null); }} style={{
+              flex: 1, padding: "12px", borderRadius: 12, border: "1.5px solid #e8e5e0", background: "#fff", fontSize: 14, color: "#888", cursor: "pointer", fontFamily: "'Noto Sans SC', sans-serif",
+            }}>重拍</button>
+            <button onClick={handleSave} style={{
+              flex: 2, padding: "12px", borderRadius: 12, border: "none", background: "#4A7C6F", color: "#fff", fontSize: 14, fontWeight: 600, cursor: "pointer", fontFamily: "'Noto Sans SC', sans-serif",
+            }}>确认保存</button>
+          </div>
+        </div>
+      )}
+      {(status === "idle" || status === "error") && (
+        <button onClick={onCancel} style={{
+          width: "100%", marginTop: 12, padding: "10px", borderRadius: 12, border: "1.5px solid #e8e5e0",
+          background: "#fff", fontSize: 14, color: "#888", cursor: "pointer", fontFamily: "'Noto Sans SC', sans-serif",
+        }}>取消</button>
+      )}
+    </div>
+  );
+}
+
+function MemberManager({ members, onUpdate }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(members);
+  const [newName, setNewName] = useState("");
+  const avatars = ["👤", "👧", "👩", "👦", "👴", "👵", "🧒", "👶"];
+  const colors = ["#4A7C6F", "#C06B5D", "#7B6B8D", "#5B7FA5", "#A08C5B", "#5BA07C"];
+
+  const handleAdd = () => {
+    if (!newName.trim() || draft.length >= 6) return;
+    setDraft([...draft, { id: createId(), name: newName.trim(), avatar: avatars[draft.length % avatars.length], color: colors[draft.length % colors.length] }]);
+    setNewName("");
+  };
+  const handleRemove = (id) => { if (draft.length <= 1) return; setDraft(draft.filter((m) => m.id !== id)); };
+  const handleSave = () => { onUpdate(draft); setEditing(false); };
+
+  if (!editing) return (
+    <button onClick={() => { setEditing(true); setDraft(members); }} style={{
+      padding: "6px 14px", borderRadius: 10, border: "1.5px solid rgba(255,255,255,0.3)", background: "rgba(255,255,255,0.15)",
+      fontSize: 12, color: "rgba(255,255,255,0.8)", cursor: "pointer", fontFamily: "'Noto Sans SC', sans-serif",
+    }}>管理成员</button>
+  );
+
+  return (
+    <div style={{ background: "#fff", borderRadius: 14, padding: 16, marginBottom: 16, boxShadow: "0 2px 12px rgba(0,0,0,0.08)" }}>
+      {draft.map((m) => (
+        <div key={m.id} style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
+          <span style={{ fontSize: 20 }}>{m.avatar}</span>
+          <span style={{ flex: 1, fontSize: 14, fontFamily: "'Noto Sans SC', sans-serif" }}>{m.name}</span>
+          {draft.length > 1 && (
+            <button onClick={() => handleRemove(m.id)} style={{
+              width: 24, height: 24, borderRadius: "50%", border: "none", background: "#f5e6e3",
+              color: "#c06b5d", fontSize: 14, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
+            }}>×</button>
+          )}
+        </div>
+      ))}
+      {draft.length < 6 && (
+        <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+          <input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="新成员姓名" style={{
+            flex: 1, padding: "8px 12px", borderRadius: 10, border: "1.5px solid #e8e5e0", fontSize: 13, fontFamily: "'Noto Sans SC', sans-serif", outline: "none",
+          }} onKeyDown={(e) => e.key === "Enter" && handleAdd()} />
+          <button onClick={handleAdd} style={{
+            padding: "8px 14px", borderRadius: 10, border: "none", background: newName.trim() ? "#4A7C6F" : "#ddd",
+            color: "#fff", fontSize: 13, cursor: newName.trim() ? "pointer" : "default", fontFamily: "'Noto Sans SC', sans-serif",
+          }}>添加</button>
+        </div>
+      )}
+      <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+        <button onClick={() => setEditing(false)} style={{
+          flex: 1, padding: "8px", borderRadius: 10, border: "1.5px solid #e8e5e0", background: "#fff", fontSize: 13, color: "#888", cursor: "pointer", fontFamily: "'Noto Sans SC', sans-serif",
+        }}>取消</button>
+        <button onClick={handleSave} style={{
+          flex: 1, padding: "8px", borderRadius: 10, border: "none", background: "#4A7C6F", color: "#fff", fontSize: 13, cursor: "pointer", fontFamily: "'Noto Sans SC', sans-serif",
+        }}>保存</button>
+      </div>
+    </div>
+  );
+}
+
+function ApiKeyModal({ apiKey, onSave, onClose }) {
+  const [key, setKey] = useState(apiKey || "");
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", zIndex: 100, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }} onClick={onClose}>
+      <div style={{ background: "#fff", borderRadius: 16, padding: 24, maxWidth: 400, width: "100%" }} onClick={(e) => e.stopPropagation()}>
+        <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 8, fontFamily: "'Noto Sans SC', sans-serif" }}>设置 API Key</div>
+        <div style={{ fontSize: 12, color: "#888", marginBottom: 16, fontFamily: "'Noto Sans SC', sans-serif" }}>拍照识别功能需要 Anthropic API Key，密钥仅保存在本地浏览器中。</div>
+        <input value={key} onChange={(e) => setKey(e.target.value)} placeholder="sk-ant-..." style={{
+          width: "100%", padding: "10px 12px", borderRadius: 10, border: "1.5px solid #e8e5e0",
+          fontSize: 14, fontFamily: "'JetBrains Mono', monospace", background: "#faf9f7", outline: "none", boxSizing: "border-box",
+        }} />
+        <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
+          <button onClick={onClose} style={{ flex: 1, padding: "10px", borderRadius: 12, border: "1.5px solid #e8e5e0", background: "#fff", fontSize: 14, color: "#888", cursor: "pointer", fontFamily: "'Noto Sans SC', sans-serif" }}>取消</button>
+          <button onClick={() => { onSave(key); onClose(); }} style={{ flex: 1, padding: "10px", borderRadius: 12, border: "none", background: "#4A7C6F", color: "#fff", fontSize: 14, fontWeight: 600, cursor: "pointer", fontFamily: "'Noto Sans SC', sans-serif" }}>保存</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function MedicalRecords() {
+  const [members, setMembers] = useState(DEFAULT_MEMBERS);
+  const [records, setRecords] = useState([]);
+  const [filterMember, setFilterMember] = useState("all");
+  const [mode, setMode] = useState("list");
+  const [loaded, setLoaded] = useState(false);
+  const [apiKey, setApiKey] = useState(localStorage.getItem("anthropic-api-key") || "");
+  const [showSettings, setShowSettings] = useState(false);
+
+  useEffect(() => {
+    storage.load().then((data) => {
+      if (data) {
+        if (data.members?.length) setMembers(data.members);
+        if (data.records?.length) setRecords(data.records);
+      }
+      setLoaded(true);
+    });
+  }, []);
+
+  useEffect(() => { if (loaded) storage.save({ members, records }); }, [members, records, loaded]);
+
+  const addRecord = useCallback((record) => { setRecords((prev) => [record, ...prev]); setMode("list"); }, []);
+  const deleteRecord = useCallback((id) => { setRecords((prev) => prev.filter((r) => r.id !== id)); }, []);
+
+  const saveApiKey = (key) => { setApiKey(key); localStorage.setItem("anthropic-api-key", key); };
+
+  const filtered = filterMember === "all" ? records : records.filter((r) => r.memberId === filterMember);
+  const sorted = [...filtered].sort((a, b) => { const da = a.date || ""; const db = b.date || ""; if (da !== db) return db.localeCompare(da); return (b.createdAt || 0) - (a.createdAt || 0); });
+
+  const groups = {};
+  sorted.forEach((r) => { const key = r.date ? r.date.slice(0, 7) : "未知日期"; if (!groups[key]) groups[key] = []; groups[key].push(r); });
+
+  return (
+    <div style={{ maxWidth: 480, margin: "0 auto", minHeight: "100vh", background: "#F5F3F0", fontFamily: "'Noto Sans SC', sans-serif" }}>
+      {showSettings && <ApiKeyModal apiKey={apiKey} onSave={saveApiKey} onClose={() => setShowSettings(false)} />}
+      <div style={{ background: "linear-gradient(135deg, #4A7C6F 0%, #3D6B5F 100%)", padding: "20px 20px 16px", position: "sticky", top: 0, zIndex: 10 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <div>
+            <div style={{ fontSize: 18, fontWeight: 700, color: "#fff", letterSpacing: 1 }}>家庭诊疗记录</div>
+            <div style={{ fontSize: 11, color: "rgba(255,255,255,0.6)", marginTop: 2 }}>{records.length} 条记录 · {members.length} 位成员</div>
+          </div>
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <button onClick={() => setShowSettings(true)} style={{
+              padding: "6px 10px", borderRadius: 10, border: "1.5px solid rgba(255,255,255,0.3)", background: "rgba(255,255,255,0.15)",
+              fontSize: 14, color: "rgba(255,255,255,0.8)", cursor: "pointer",
+            }} title="设置 API Key">⚙️</button>
+            <MemberManager members={members} onUpdate={setMembers} />
+          </div>
+        </div>
+      </div>
+
+      <div style={{ padding: "16px 16px 100px" }}>
+        {mode !== "list" && (
+          <div style={{ background: "#fff", borderRadius: 16, padding: 16, marginBottom: 16, boxShadow: "0 2px 12px rgba(0,0,0,0.06)" }}>
+            <div style={{ fontSize: 15, fontWeight: 600, color: "#333", marginBottom: 14 }}>{mode === "photo" ? "📸 拍照识别" : "✏️ 快速记录"}</div>
+            {mode === "photo" ? <PhotoCapture members={members} onSave={addRecord} onCancel={() => setMode("list")} apiKey={apiKey} /> : <QuickForm members={members} onSave={addRecord} onCancel={() => setMode("list")} />}
+          </div>
+        )}
+        {mode === "list" && (
+          <>
+            <div style={{ display: "flex", gap: 6, marginBottom: 16, overflowX: "auto", paddingBottom: 4 }}>
+              <button onClick={() => setFilterMember("all")} style={{
+                padding: "5px 14px", borderRadius: 16, border: filterMember === "all" ? "2px solid #4A7C6F" : "2px solid transparent",
+                background: filterMember === "all" ? "#4A7C6F18" : "#fff", color: filterMember === "all" ? "#4A7C6F" : "#999",
+                fontSize: 13, fontWeight: filterMember === "all" ? 600 : 400, cursor: "pointer", whiteSpace: "nowrap", fontFamily: "'Noto Sans SC', sans-serif",
+              }}>全部</button>
+              {members.map((m) => <MemberPill key={m.id} member={m} selected={filterMember === m.id} onClick={() => setFilterMember(m.id)} />)}
+            </div>
+            {Object.keys(groups).length === 0 ? (
+              <div style={{ textAlign: "center", padding: "60px 20px", color: "#bbb" }}>
+                <div style={{ fontSize: 40, marginBottom: 12 }}>📋</div>
+                <div style={{ fontSize: 14 }}>还没有记录</div>
+                <div style={{ fontSize: 12, marginTop: 4, color: "#ccc" }}>点击下方按钮开始记录</div>
+              </div>
+            ) : (
+              Object.entries(groups).map(([month, recs]) => (
+                <div key={month} style={{ marginBottom: 20 }}>
+                  <div style={{ fontSize: 12, fontWeight: 600, color: "#aaa", marginBottom: 8, paddingLeft: 2, fontFamily: "'JetBrains Mono', monospace", letterSpacing: 1 }}>{month}</div>
+                  {recs.map((r) => <RecordCard key={r.id} record={r} members={members} onDelete={deleteRecord} />)}
+                </div>
+              ))
+            )}
+          </>
+        )}
+      </div>
+
+      {mode === "list" && (
+        <div style={{ position: "fixed", bottom: 24, left: "50%", transform: "translateX(-50%)", display: "flex", gap: 12, zIndex: 20 }}>
+          <button onClick={() => setMode("photo")} style={{
+            width: 56, height: 56, borderRadius: "50%", border: "none", background: "#4A7C6F", color: "#fff",
+            fontSize: 24, cursor: "pointer", boxShadow: "0 4px 16px rgba(74,124,111,0.4)",
+            display: "flex", alignItems: "center", justifyContent: "center", transition: "transform 0.15s",
+          }} onMouseDown={(e) => (e.currentTarget.style.transform = "scale(0.92)")} onMouseUp={(e) => (e.currentTarget.style.transform = "scale(1)")}>📸</button>
+          <button onClick={() => setMode("form")} style={{
+            width: 56, height: 56, borderRadius: "50%", border: "none", background: "#5B7FA5", color: "#fff",
+            fontSize: 24, cursor: "pointer", boxShadow: "0 4px 16px rgba(91,127,165,0.4)",
+            display: "flex", alignItems: "center", justifyContent: "center", transition: "transform 0.15s",
+          }} onMouseDown={(e) => (e.currentTarget.style.transform = "scale(0.92)")} onMouseUp={(e) => (e.currentTarget.style.transform = "scale(1)")}>✏️</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<MedicalRecords />);
+</script>
+</body>
+</html>
