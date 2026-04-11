@@ -50,23 +50,22 @@ const RECORD_TYPES = [
 
 const createId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
 
-async function extractFromImage(base64Data, mediaType, apiKey) {
+async function extractFromImage(base64Data, mediaType, config) {
   try {
-    const response = await fetch("https://api.anthropic.com/v1/messages", {
+    const url = config.url.replace(/\/$/, "") + "/chat/completions";
+    const response = await fetch(url, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "x-api-key": apiKey,
-        "anthropic-version": "2023-06-01",
-        "anthropic-dangerous-direct-browser-access": "true",
+        "Authorization": "Bearer " + config.apiKey,
       },
       body: JSON.stringify({
-        model: "claude-sonnet-4-20250514",
+        model: config.endpoint,
         max_tokens: 1000,
         messages: [{
           role: "user",
           content: [
-            { type: "image", source: { type: "base64", media_type: mediaType, data: base64Data } },
+            { type: "image_url", image_url: { url: `data:${mediaType};base64,${base64Data}` } },
             { type: "text", text: `这是一张医疗相关的单据/报告照片。请提取关键信息，用JSON格式返回，不要包含markdown标记或其他文字。格式：
 {"date":"YYYY-MM-DD或空字符串","hospital":"医院名或空","doctor":"医生名或空","diagnosis":"诊断或空","medications":[{"name":"药名","dosage":"用法用量"}],"tests":[{"name":"检查项","result":"结果"}],"summary":"一句话摘要","type":"visit|medication|test|symptom|note"}
 如果某项信息不存在就用空字符串或空数组。` },
@@ -75,7 +74,7 @@ async function extractFromImage(base64Data, mediaType, apiKey) {
       }),
     });
     const data = await response.json();
-    const text = data.content?.map((i) => i.text || "").join("") || "";
+    const text = data.choices?.[0]?.message?.content || "";
     const clean = text.replace(/```json|```/g, "").trim();
     return JSON.parse(clean);
   } catch (e) {
@@ -200,7 +199,7 @@ function QuickForm({ members, onSave, onCancel }) {
   );
 }
 
-function PhotoCapture({ members, onSave, onCancel, apiKey }) {
+function PhotoCapture({ members, onSave, onCancel, aiConfig }) {
   const [memberId, setMemberId] = useState(members[0]?.id);
   const [status, setStatus] = useState("idle");
   const [extracted, setExtracted] = useState(null);
@@ -211,7 +210,7 @@ function PhotoCapture({ members, onSave, onCancel, apiKey }) {
   const handleFile = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    if (!apiKey) { alert("请先在设置中填写 Anthropic API Key"); return; }
+    if (!aiConfig.apiKey || !aiConfig.url || !aiConfig.endpoint) { alert("请先在设置中填写火山引擎配置"); return; }
     setStatus("processing");
     const fullData = await new Promise((res) => { const r = new FileReader(); r.onload = () => res(r.result); r.readAsDataURL(file); });
     setImageData(fullData);
@@ -223,7 +222,7 @@ function PhotoCapture({ members, onSave, onCancel, apiKey }) {
     setImageThumb(thumb);
     const base64 = fullData.split(",")[1];
     const mediaType = file.type || "image/jpeg";
-    const result = await extractFromImage(base64, mediaType, apiKey);
+    const result = await extractFromImage(base64, mediaType, aiConfig);
     if (result) { setExtracted(result); setStatus("done"); } else { setStatus("error"); }
   };
 
@@ -366,20 +365,28 @@ function MemberManager({ members, onUpdate }) {
   );
 }
 
-function ApiKeyModal({ apiKey, onSave, onClose }) {
-  const [key, setKey] = useState(apiKey || "");
+function SettingsModal({ aiConfig, onSave, onClose }) {
+  const [url, setUrl] = useState(aiConfig.url || "");
+  const [apiKey, setApiKey] = useState(aiConfig.apiKey || "");
+  const [endpoint, setEndpoint] = useState(aiConfig.endpoint || "");
+  const inputStyle = {
+    width: "100%", padding: "10px 12px", borderRadius: 10, border: "1.5px solid #e8e5e0",
+    fontSize: 13, fontFamily: "'JetBrains Mono', monospace", background: "#faf9f7", outline: "none", boxSizing: "border-box", marginBottom: 10,
+  };
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", zIndex: 100, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }} onClick={onClose}>
       <div style={{ background: "#fff", borderRadius: 16, padding: 24, maxWidth: 400, width: "100%" }} onClick={(e) => e.stopPropagation()}>
-        <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 8, fontFamily: "'Noto Sans SC', sans-serif" }}>设置 API Key</div>
-        <div style={{ fontSize: 12, color: "#888", marginBottom: 16, fontFamily: "'Noto Sans SC', sans-serif" }}>拍照识别功能需要 Anthropic API Key，密钥仅保存在本地浏览器中。</div>
-        <input value={key} onChange={(e) => setKey(e.target.value)} placeholder="sk-ant-..." style={{
-          width: "100%", padding: "10px 12px", borderRadius: 10, border: "1.5px solid #e8e5e0",
-          fontSize: 14, fontFamily: "'JetBrains Mono', monospace", background: "#faf9f7", outline: "none", boxSizing: "border-box",
-        }} />
-        <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
+        <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 8, fontFamily: "'Noto Sans SC', sans-serif" }}>火山引擎配置</div>
+        <div style={{ fontSize: 12, color: "#888", marginBottom: 16, fontFamily: "'Noto Sans SC', sans-serif" }}>拍照识别功能需要配置火山引擎 API，所有信息仅保存在本地浏览器中。</div>
+        <div style={{ fontSize: 12, color: "#666", marginBottom: 4, fontFamily: "'Noto Sans SC', sans-serif" }}>API URL</div>
+        <input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://ark.cn-beijing.volces.com/api/v3" style={inputStyle} />
+        <div style={{ fontSize: 12, color: "#666", marginBottom: 4, fontFamily: "'Noto Sans SC', sans-serif" }}>API Key</div>
+        <input value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder="输入你的 API Key" type="password" style={inputStyle} />
+        <div style={{ fontSize: 12, color: "#666", marginBottom: 4, fontFamily: "'Noto Sans SC', sans-serif" }}>Endpoint (模型接入点)</div>
+        <input value={endpoint} onChange={(e) => setEndpoint(e.target.value)} placeholder="如 ep-20240xxx-xxxxx" style={inputStyle} />
+        <div style={{ display: "flex", gap: 10, marginTop: 6 }}>
           <button onClick={onClose} style={{ flex: 1, padding: "10px", borderRadius: 12, border: "1.5px solid #e8e5e0", background: "#fff", fontSize: 14, color: "#888", cursor: "pointer", fontFamily: "'Noto Sans SC', sans-serif" }}>取消</button>
-          <button onClick={() => { onSave(key); onClose(); }} style={{ flex: 1, padding: "10px", borderRadius: 12, border: "none", background: "#4A7C6F", color: "#fff", fontSize: 14, fontWeight: 600, cursor: "pointer", fontFamily: "'Noto Sans SC', sans-serif" }}>保存</button>
+          <button onClick={() => { onSave({ url, apiKey, endpoint }); onClose(); }} style={{ flex: 1, padding: "10px", borderRadius: 12, border: "none", background: "#4A7C6F", color: "#fff", fontSize: 14, fontWeight: 600, cursor: "pointer", fontFamily: "'Noto Sans SC', sans-serif" }}>保存</button>
         </div>
       </div>
     </div>
@@ -392,7 +399,9 @@ function MedicalRecords() {
   const [filterMember, setFilterMember] = useState("all");
   const [mode, setMode] = useState("list");
   const [loaded, setLoaded] = useState(false);
-  const [apiKey, setApiKey] = useState(localStorage.getItem("anthropic-api-key") || "");
+  const [aiConfig, setAiConfig] = useState(() => {
+    try { return JSON.parse(localStorage.getItem("volcengine-config") || "{}"); } catch { return {}; }
+  });
   const [showSettings, setShowSettings] = useState(false);
 
   useEffect(() => {
@@ -410,7 +419,16 @@ function MedicalRecords() {
   const addRecord = useCallback((record) => { setRecords((prev) => [record, ...prev]); setMode("list"); }, []);
   const deleteRecord = useCallback((id) => { setRecords((prev) => prev.filter((r) => r.id !== id)); }, []);
 
-  const saveApiKey = (key) => { setApiKey(key); localStorage.setItem("anthropic-api-key", key); };
+  const saveAiConfig = (cfg) => { setAiConfig(cfg); localStorage.setItem("volcengine-config", JSON.stringify(cfg)); };
+
+  const exportData = () => {
+    const exportRecords = records.map(({ imageData, imageThumb, ...rest }) => rest);
+    const data = { members, records: exportRecords, exportedAt: new Date().toISOString() };
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a"); a.href = url; a.download = `medical-records-${new Date().toISOString().slice(0,10)}.json`; a.click();
+    URL.revokeObjectURL(url);
+  };
 
   const filtered = filterMember === "all" ? records : records.filter((r) => r.memberId === filterMember);
   const sorted = [...filtered].sort((a, b) => { const da = a.date || ""; const db = b.date || ""; if (da !== db) return db.localeCompare(da); return (b.createdAt || 0) - (a.createdAt || 0); });
@@ -420,7 +438,7 @@ function MedicalRecords() {
 
   return (
     <div style={{ maxWidth: 480, margin: "0 auto", minHeight: "100vh", background: "#F5F3F0", fontFamily: "'Noto Sans SC', sans-serif" }}>
-      {showSettings && <ApiKeyModal apiKey={apiKey} onSave={saveApiKey} onClose={() => setShowSettings(false)} />}
+      {showSettings && <SettingsModal aiConfig={aiConfig} onSave={saveAiConfig} onClose={() => setShowSettings(false)} />}
       <div style={{ background: "linear-gradient(135deg, #4A7C6F 0%, #3D6B5F 100%)", padding: "20px 20px 16px", position: "sticky", top: 0, zIndex: 10 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <div>
@@ -428,10 +446,14 @@ function MedicalRecords() {
             <div style={{ fontSize: 11, color: "rgba(255,255,255,0.6)", marginTop: 2 }}>{records.length} 条记录 · {members.length} 位成员</div>
           </div>
           <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            {records.length > 0 && <button onClick={exportData} style={{
+              padding: "6px 10px", borderRadius: 10, border: "1.5px solid rgba(255,255,255,0.3)", background: "rgba(255,255,255,0.15)",
+              fontSize: 12, color: "rgba(255,255,255,0.8)", cursor: "pointer", fontFamily: "'Noto Sans SC', sans-serif",
+            }} title="导出数据">导出</button>}
             <button onClick={() => setShowSettings(true)} style={{
               padding: "6px 10px", borderRadius: 10, border: "1.5px solid rgba(255,255,255,0.3)", background: "rgba(255,255,255,0.15)",
               fontSize: 14, color: "rgba(255,255,255,0.8)", cursor: "pointer",
-            }} title="设置 API Key">⚙️</button>
+            }} title="火山引擎配置">⚙️</button>
             <MemberManager members={members} onUpdate={setMembers} />
           </div>
         </div>
@@ -441,7 +463,7 @@ function MedicalRecords() {
         {mode !== "list" && (
           <div style={{ background: "#fff", borderRadius: 16, padding: 16, marginBottom: 16, boxShadow: "0 2px 12px rgba(0,0,0,0.06)" }}>
             <div style={{ fontSize: 15, fontWeight: 600, color: "#333", marginBottom: 14 }}>{mode === "photo" ? "📸 拍照识别" : "✏️ 快速记录"}</div>
-            {mode === "photo" ? <PhotoCapture members={members} onSave={addRecord} onCancel={() => setMode("list")} apiKey={apiKey} /> : <QuickForm members={members} onSave={addRecord} onCancel={() => setMode("list")} />}
+            {mode === "photo" ? <PhotoCapture members={members} onSave={addRecord} onCancel={() => setMode("list")} aiConfig={aiConfig} /> : <QuickForm members={members} onSave={addRecord} onCancel={() => setMode("list")} />}
           </div>
         )}
         {mode === "list" && (
