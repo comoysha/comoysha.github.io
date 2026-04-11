@@ -195,9 +195,43 @@ const RECORD_TYPES = [
 
 const createId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
 
-const PROMPT_TEXT = `这是一张医疗相关的单据/报告照片。请提取关键信息，用JSON格式返回，不要包含markdown标记或其他文字。格式：
-{"date":"YYYY-MM-DD或空字符串","hospital":"医院名或空","doctor":"医生名或空","diagnosis":"诊断或空","medications":[{"name":"药名","dosage":"用法用量"}],"tests":[{"name":"检查项","result":"结果"}],"summary":"一句话摘要","type":"visit|medication|test|symptom|note"}
-如果某项信息不存在就用空字符串或空数组。`;
+const PROMPT_TEXT = "你是医疗单据识别助手。请从图片中提取所有可识别的医疗信息，填入对应字段。无法识别的字段填空字符串或空数组。type 根据内容判断：就诊填 visit，用药填 medication，检查报告填 test，症状记录填 symptom，其他填 note。";
+
+const MEDICAL_RECORD_SCHEMA = {
+  type: "json_schema",
+  name: "medical_record",
+  strict: true,
+  schema: {
+    type: "object",
+    properties: {
+      date: { type: "string", description: "日期 YYYY-MM-DD，无法识别则空字符串" },
+      hospital: { type: "string", description: "医院名称，无则空字符串" },
+      doctor: { type: "string", description: "医生姓名，无则空字符串" },
+      diagnosis: { type: "string", description: "诊断结果，无则空字符串" },
+      medications: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: { name: { type: "string", description: "药品名称" }, dosage: { type: "string", description: "用法用量" } },
+          required: ["name", "dosage"], additionalProperties: false
+        }
+      },
+      tests: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: { name: { type: "string", description: "检查项目" }, result: { type: "string", description: "检查结果" } },
+          required: ["name", "result"], additionalProperties: false
+        }
+      },
+      summary: { type: "string", description: "一句话概要" },
+      type: { type: "string", description: "记录类型：visit|medication|test|symptom|note" },
+      notes: { type: "string", description: "补充备注信息，无则空字符串" }
+    },
+    required: ["date", "hospital", "doctor", "diagnosis", "medications", "tests", "summary", "type", "notes"],
+    additionalProperties: false
+  }
+};
 
 async function extractFromImage(base64Data, mediaType, config) {
   try {
@@ -209,26 +243,28 @@ async function extractFromImage(base64Data, mediaType, config) {
       url = baseUrl + "/responses";
       body = {
         model: config.endpoint,
-        input: [{
-          role: "user",
-          content: [
-            { type: "input_image", image_url: `data:${mediaType};base64,${base64Data}` },
-            { type: "input_text", text: PROMPT_TEXT },
-          ],
-        }],
+        thinking: { type: "disabled" },
+        text: { format: MEDICAL_RECORD_SCHEMA },
+        input: [
+          { role: "system", content: PROMPT_TEXT },
+          { role: "user", content: [
+            { type: "input_image", image_url: "data:" + mediaType + ";base64," + base64Data },
+            { type: "input_text", text: "请识别这张医疗单据/报告的内容。" },
+          ]},
+        ],
       };
     } else {
       url = baseUrl + "/chat/completions";
       body = {
         model: config.endpoint,
         max_tokens: 1000,
-        messages: [{
-          role: "user",
-          content: [
-            { type: "image_url", image_url: { url: `data:${mediaType};base64,${base64Data}` } },
-            { type: "text", text: PROMPT_TEXT },
-          ],
-        }],
+        messages: [
+          { role: "system", content: PROMPT_TEXT },
+          { role: "user", content: [
+            { type: "image_url", image_url: { url: "data:" + mediaType + ";base64," + base64Data } },
+            { type: "text", text: "请识别这张医疗单据/报告的内容，以JSON格式返回。" },
+          ]},
+        ],
       };
     }
 
@@ -239,19 +275,85 @@ async function extractFromImage(base64Data, mediaType, config) {
     });
     const data = await response.json();
 
-    let text = "";
+    var text = "";
     if (apiType === "responses") {
-      text = (data.output || []).filter(o => o.type === "message").flatMap(o => (o.content || []).filter(c => c.type === "output_text").map(c => c.text)).join("") || "";
+      text = (data.output || []).filter(function(o) { return o.type === "message"; }).map(function(o) { return (o.content || []).filter(function(c) { return c.type === "output_text"; }).map(function(c) { return c.text; }).join(""); }).join("") || "";
     } else {
-      text = data.choices?.[0]?.message?.content || "";
+      text = (data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content) || "";
     }
-    const clean = text.replace(/```json|```/g, "").trim();
+    var clean = text.replace(/```json|```/g, "").trim();
     return JSON.parse(clean);
   } catch (e) {
     console.error("OCR failed:", e);
     return null;
   }
 }
+
+const TYPE_PROMPTS = {
+  visit: "记录类型：就诊记录。请重点提取：就诊日期、医院名称、医生姓名、诊断结果、开具的药物（药名、剂量）、检查项目（名称、结果），并生成一句话总结。",
+  medication: "记录类型：用药记录。请重点提取：日期、所有药物信息（药名、剂量用法），以及开药医院和医生（如有）。药物信息是核心。",
+  test: "记录类型：检查记录。请重点提取：检查日期、医院、所有检查/化验项目（名称、结果），以及医生和诊断（如有）。",
+  symptom: "记录类型：症状记录。请重点提取：症状出现日期、症状的详细描述作为summary，以及可能的诊断（如有）。",
+  note: "记录类型：备注。请提取日期，将主要内容整理为summary，补充细节放入notes。",
+};
+
+async function extractFromText(text, type, config) {
+  try {
+    var baseUrl = config.url.replace(/\/$/, "");
+    var apiType = config.apiType || "responses";
+    var typePrompt = TYPE_PROMPTS[type] || TYPE_PROMPTS.note;
+    var sysPrompt = "你是医疗记录解析助手。用户会提供一段关于医疗/健康的文字描述，请从中提取结构化信息。无法确定的字段填空字符串或空数组。type固定填\"" + type + "\"。\n" + typePrompt;
+    var url, body;
+
+    if (apiType === "responses") {
+      url = baseUrl + "/responses";
+      body = {
+        model: config.endpoint,
+        thinking: { type: "disabled" },
+        text: { format: MEDICAL_RECORD_SCHEMA },
+        input: [
+          { role: "system", content: sysPrompt },
+          { role: "user", content: [{ type: "input_text", text: text }] },
+        ],
+      };
+    } else {
+      url = baseUrl + "/chat/completions";
+      body = {
+        model: config.endpoint, max_tokens: 1000,
+        messages: [
+          { role: "system", content: sysPrompt },
+          { role: "user", content: text },
+        ],
+      };
+    }
+
+    var response = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Authorization": "Bearer " + config.apiKey },
+      body: JSON.stringify(body),
+    });
+    var data = await response.json();
+    var resultText = "";
+    if (apiType === "responses") {
+      resultText = (data.output || []).filter(function(o) { return o.type === "message"; }).map(function(o) { return (o.content || []).filter(function(c) { return c.type === "output_text"; }).map(function(c) { return c.text; }).join(""); }).join("") || "";
+    } else {
+      resultText = (data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content) || "";
+    }
+    return JSON.parse(resultText.replace(/```json|```/g, "").trim());
+  } catch (e) {
+    console.error("Text extraction failed:", e);
+    return null;
+  }
+}
+
+// ============ Field config per record type ============
+var TYPE_FIELDS = {
+  visit:      { summary: "就诊概要 *", hospital: true, doctor: true, diagnosis: true, medications: true, tests: false, notes: true },
+  medication: { summary: "用药概要 *", hospital: "选填", doctor: "选填", diagnosis: false, medications: true, tests: false, notes: true },
+  test:       { summary: "检查概要 *", hospital: true, doctor: "选填", diagnosis: "选填", medications: false, tests: true, notes: true },
+  symptom:    { summary: "症状描述 *", hospital: false, doctor: false, diagnosis: "选填", medications: false, tests: false, notes: true },
+  note:       { summary: "内容 *",     hospital: false, doctor: false, diagnosis: false, medications: false, tests: false, notes: true },
+};
 
 function MemberPill({ member, selected, onClick }) {
   return (
@@ -280,28 +382,170 @@ function TypeChip({ type, selected, onClick }) {
   );
 }
 
-function EditForm({ record, members, onSave, onCancel }) {
-  const [memberId, setMemberId] = useState(record.memberId);
-  const [type, setType] = useState(record.type || "visit");
-  const [date, setDate] = useState(record.date || "");
-  const [summary, setSummary] = useState(record.summary || "");
-  const [hospital, setHospital] = useState(record.hospital || "");
-  const [diagnosis, setDiagnosis] = useState(record.diagnosis || "");
-  const [medText, setMedText] = useState((record.medications || []).map(function(m) { return m.name + (m.dosage ? "—" + m.dosage : ""); }).join("，"));
-  const [notes, setNotes] = useState(record.notes || "");
+function ImageViewer({ src, onClose }) {
+  var handleDownload = function(e) {
+    e.stopPropagation();
+    var a = document.createElement("a");
+    if (src.startsWith("data:")) {
+      a.href = src;
+    } else {
+      a.href = src;
+      a.target = "_blank";
+    }
+    a.download = "medical-image-" + Date.now() + ".jpg";
+    a.click();
+  };
+  return (
+    <div onClick={onClose} style={{
+      position: "fixed", inset: 0, background: "rgba(0,0,0,0.85)", zIndex: 200,
+      display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: 20,
+    }}>
+      <img src={src} alt="" style={{ maxWidth: "100%", maxHeight: "80vh", borderRadius: 8, objectFit: "contain" }} onClick={function(e) { e.stopPropagation(); }} />
+      <div style={{ display: "flex", gap: 16, marginTop: 16 }}>
+        <button onClick={handleDownload} style={{
+          padding: "10px 24px", borderRadius: 12, border: "none", background: "#fff", color: "#333",
+          fontSize: 14, fontWeight: 600, cursor: "pointer", fontFamily: "'Noto Sans SC', sans-serif",
+        }}>下载</button>
+        <button onClick={onClose} style={{
+          padding: "10px 24px", borderRadius: 12, border: "1.5px solid rgba(255,255,255,0.4)", background: "transparent", color: "#fff",
+          fontSize: 14, cursor: "pointer", fontFamily: "'Noto Sans SC', sans-serif",
+        }}>关闭</button>
+      </div>
+    </div>
+  );
+}
 
-  const handleSave = () => {
-    if (!summary.trim()) return;
-    const meds = medText.split(/[,，\n]/).map(function(s) { return s.trim(); }).filter(Boolean).map(function(s) {
-      var parts = s.split(/[-—]/);
-      return { name: (parts[0] || s).trim(), dosage: (parts[1] || "").trim() };
-    });
-    onSave(Object.assign({}, record, { memberId: memberId, type: type, date: date, summary: summary.trim(), hospital: hospital, diagnosis: diagnosis, medications: meds, notes: notes }));
+function ImageAttachment({ imageUrl, imageData, imageThumb, thumbUrl, onChange }) {
+  var fileRef = useRef();
+  var currentSrc = imageUrl || imageData || null;
+  var currentThumbSrc = thumbUrl || imageThumb || null;
+  var [uploading, setUploading] = useState(false);
+
+  var handleFile = function(e) {
+    var file = e.target.files && e.target.files[0];
+    if (!file) return;
+    var reader = new FileReader();
+    reader.onload = function() {
+      var fullData = reader.result;
+      var img = new Image();
+      img.onload = function() {
+        var c = document.createElement("canvas");
+        var s = 88 / Math.max(img.width, img.height);
+        c.width = img.width * s; c.height = img.height * s;
+        c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+        onChange({ imageData: fullData, imageThumb: c.toDataURL("image/jpeg", 0.7), imageUrl: null, thumbUrl: null });
+      };
+      img.src = fullData;
+    };
+    reader.readAsDataURL(file);
   };
 
-  const inputStyle = {
+  var handleRemove = function() { onChange({ imageData: null, imageThumb: null, imageUrl: null, thumbUrl: null }); };
+
+  return (
+    <div style={{ marginBottom: 10 }}>
+      <input ref={fileRef} type="file" accept="image/*" onChange={handleFile} style={{ display: "none" }} />
+      {!currentSrc && !currentThumbSrc ? (
+        <button onClick={function() { fileRef.current && fileRef.current.click(); }} style={{
+          width: "100%", padding: "12px", borderRadius: 10, border: "1.5px dashed #d0cdc5",
+          background: "#faf9f7", fontSize: 13, color: "#aaa", cursor: "pointer",
+          fontFamily: "'Noto Sans SC', sans-serif", display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
+        }}>
+          <span style={{ fontSize: 16 }}>📎</span> 添加图片（选填）
+        </button>
+      ) : (
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <div style={{ position: "relative", display: "inline-block" }}>
+            <img src={currentThumbSrc || currentSrc} alt="" style={{ width: 64, height: 64, borderRadius: 10, objectFit: "cover" }} />
+            <button onClick={handleRemove} style={{
+              position: "absolute", top: -6, right: -6, width: 20, height: 20, borderRadius: "50%",
+              border: "none", background: "#c06b5d", color: "#fff", fontSize: 12,
+              cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
+            }}>×</button>
+          </div>
+          <button onClick={function() { fileRef.current && fileRef.current.click(); }} style={{
+            padding: "6px 12px", borderRadius: 8, border: "1.5px solid #e8e5e0", background: "#fff",
+            fontSize: 12, color: "#888", cursor: "pointer", fontFamily: "'Noto Sans SC', sans-serif",
+          }}>换一张</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function TypedFormFields({ type, state, setState, inputStyle }) {
+  var fields = TYPE_FIELDS[type] || TYPE_FIELDS.note;
+  var set = function(k) { return function(e) { var o = {}; o[k] = e.target.value; setState(Object.assign({}, state, o)); }; };
+  return (
+    <>
+      <input type="date" value={state.date} onChange={set("date")} style={Object.assign({}, inputStyle, { marginBottom: 8 })} />
+      <input placeholder={fields.summary} value={state.summary} onChange={set("summary")} style={Object.assign({}, inputStyle, { marginBottom: 8 })} autoFocus />
+      {fields.hospital && <input placeholder={fields.hospital === true ? "医院" : "医院（选填）"} value={state.hospital} onChange={set("hospital")} style={Object.assign({}, inputStyle, { marginBottom: 8 })} />}
+      {fields.doctor && <input placeholder={fields.doctor === true ? "医生" : "医生（选填）"} value={state.doctor} onChange={set("doctor")} style={Object.assign({}, inputStyle, { marginBottom: 8 })} />}
+      {fields.diagnosis && <input placeholder={fields.diagnosis === true ? "诊断" : "诊断（选填）"} value={state.diagnosis} onChange={set("diagnosis")} style={Object.assign({}, inputStyle, { marginBottom: 8 })} />}
+      {fields.medications && <input placeholder="用药，逗号分隔（如：阿奇霉素—5次点滴，顺尔宁4mg）" value={state.medText} onChange={set("medText")} style={Object.assign({}, inputStyle, { marginBottom: 8 })} />}
+      {fields.tests && <input placeholder="检查项，逗号分隔（如：血常规—白细胞偏高，CRP—12mg/L）" value={state.testText} onChange={set("testText")} style={Object.assign({}, inputStyle, { marginBottom: 8 })} />}
+      {fields.notes && <textarea placeholder="补充备注（选填）" value={state.notes} onChange={set("notes")} rows={2} style={Object.assign({}, inputStyle, { marginBottom: 8, resize: "vertical" })} />}
+    </>
+  );
+}
+
+function EditForm({ record, members, onSave, onCancel }) {
+  var initMedText = (record.medications || []).map(function(m) { return m.name + (m.dosage ? "—" + m.dosage : ""); }).join("，");
+  var initTestText = (record.tests || []).map(function(t) { return t.name + (t.result ? "—" + t.result : ""); }).join("，");
+  const [memberId, setMemberId] = useState(record.memberId);
+  const [type, setType] = useState(record.type || "visit");
+  const [formState, setFormState] = useState({
+    date: record.date || "", summary: record.summary || "", hospital: record.hospital || "",
+    doctor: record.doctor || "", diagnosis: record.diagnosis || "", medText: initMedText,
+    testText: initTestText, notes: record.notes || "",
+  });
+  const [imgState, setImgState] = useState({
+    imageUrl: record.imageUrl || null, thumbUrl: record.thumbUrl || null,
+    imageData: record.imageData || null, imageThumb: record.imageThumb || null,
+  });
+  const [saving, setSaving] = useState(false);
+
+  var handleSave = async function() {
+    if (!formState.summary.trim() || saving) return;
+    setSaving(true);
+    var meds = (formState.medText || "").split(/[,，\n]/).map(function(s) { return s.trim(); }).filter(Boolean).map(function(s) {
+      var parts = s.split(/[-—]/); return { name: (parts[0] || s).trim(), dosage: (parts[1] || "").trim() };
+    });
+    var tests = (formState.testText || "").split(/[,，\n]/).map(function(s) { return s.trim(); }).filter(Boolean).map(function(s) {
+      var parts = s.split(/[-—]/); return { name: (parts[0] || s).trim(), result: (parts[1] || "").trim() };
+    });
+    var updated = Object.assign({}, record, {
+      memberId: memberId, type: type, date: formState.date, summary: formState.summary.trim(),
+      hospital: formState.hospital, doctor: formState.doctor, diagnosis: formState.diagnosis,
+      medications: meds, tests: tests, notes: formState.notes,
+    });
+    // Handle image: if new local image, upload to TOS
+    if (imgState.imageData && !imgState.imageUrl) {
+      if (tosHelper.isConfigured()) {
+        try {
+          updated.imageUrl = await tosHelper.uploadBase64(imgState.imageData, record.id);
+          updated.thumbUrl = await tosHelper.uploadThumb(imgState.imageThumb, record.id);
+          delete updated.imageData; delete updated.imageThumb;
+        } catch (e) {
+          updated.imageData = imgState.imageData; updated.imageThumb = imgState.imageThumb;
+        }
+      } else {
+        updated.imageData = imgState.imageData; updated.imageThumb = imgState.imageThumb;
+      }
+    } else if (imgState.imageUrl) {
+      updated.imageUrl = imgState.imageUrl; updated.thumbUrl = imgState.thumbUrl;
+      delete updated.imageData; delete updated.imageThumb;
+    } else {
+      delete updated.imageUrl; delete updated.thumbUrl; delete updated.imageData; delete updated.imageThumb;
+    }
+    setSaving(false);
+    onSave(updated);
+  };
+
+  var inputStyle = {
     width: "100%", padding: "10px 12px", borderRadius: 10, border: "1.5px solid #e8e5e0",
-    fontSize: 14, fontFamily: "'Noto Sans SC', sans-serif", background: "#faf9f7", outline: "none", boxSizing: "border-box", transition: "border-color 0.2s",
+    fontSize: 14, fontFamily: "'Noto Sans SC', sans-serif", background: "#faf9f7", outline: "none", boxSizing: "border-box",
   };
 
   return (
@@ -313,15 +557,11 @@ function EditForm({ record, members, onSave, onCancel }) {
       <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 10 }}>
         {RECORD_TYPES.map(function(t) { return <TypeChip key={t.key} type={t} selected={type === t.key} onClick={function() { setType(t.key); }} />; })}
       </div>
-      <input type="date" value={date} onChange={function(e) { setDate(e.target.value); }} style={Object.assign({}, inputStyle, { marginBottom: 8 })} />
-      <input placeholder="一句话概要 *" value={summary} onChange={function(e) { setSummary(e.target.value); }} style={Object.assign({}, inputStyle, { marginBottom: 8 })} />
-      <input placeholder="医院（选填）" value={hospital} onChange={function(e) { setHospital(e.target.value); }} style={Object.assign({}, inputStyle, { marginBottom: 8 })} />
-      <input placeholder="诊断（选填）" value={diagnosis} onChange={function(e) { setDiagnosis(e.target.value); }} style={Object.assign({}, inputStyle, { marginBottom: 8 })} />
-      <input placeholder="用药，逗号分隔（选填）" value={medText} onChange={function(e) { setMedText(e.target.value); }} style={Object.assign({}, inputStyle, { marginBottom: 8 })} />
-      <textarea placeholder="其他备注（选填）" value={notes} onChange={function(e) { setNotes(e.target.value); }} rows={2} style={Object.assign({}, inputStyle, { marginBottom: 10, resize: "vertical" })} />
+      <TypedFormFields type={type} state={formState} setState={setFormState} inputStyle={inputStyle} />
+      <ImageAttachment imageUrl={imgState.imageUrl} imageData={imgState.imageData} imageThumb={imgState.imageThumb} thumbUrl={imgState.thumbUrl} onChange={setImgState} />
       <div style={{ display: "flex", gap: 10 }}>
         <button onClick={onCancel} style={{ flex: 1, padding: "10px", borderRadius: 12, border: "1.5px solid #e8e5e0", background: "#fff", fontSize: 13, color: "#888", cursor: "pointer", fontFamily: "'Noto Sans SC', sans-serif" }}>取消</button>
-        <button onClick={handleSave} style={{ flex: 2, padding: "10px", borderRadius: 12, border: "none", background: summary.trim() ? "#4A7C6F" : "#ccc", color: "#fff", fontSize: 13, fontWeight: 600, cursor: summary.trim() ? "pointer" : "default", fontFamily: "'Noto Sans SC', sans-serif" }}>保存修改</button>
+        <button onClick={handleSave} disabled={saving} style={{ flex: 2, padding: "10px", borderRadius: 12, border: "none", background: (formState.summary.trim() && !saving) ? "#4A7C6F" : "#ccc", color: "#fff", fontSize: 13, fontWeight: 600, cursor: (formState.summary.trim() && !saving) ? "pointer" : "default", fontFamily: "'Noto Sans SC', sans-serif" }}>{saving ? "保存中..." : "保存修改"}</button>
       </div>
     </div>
   );
@@ -330,6 +570,7 @@ function EditForm({ record, members, onSave, onCancel }) {
 function RecordCard({ record, members, onDelete, onEdit }) {
   const [expanded, setExpanded] = useState(false);
   const [editing, setEditing] = useState(false);
+  const [viewImage, setViewImage] = useState(null);
   const member = members.find((m) => m.id === record.memberId) || members[0];
 
   if (editing) {
@@ -351,7 +592,7 @@ function RecordCard({ record, members, onDelete, onEdit }) {
           <div style={{ fontSize: 14, color: "#333", fontFamily: "'Noto Sans SC', sans-serif", lineHeight: 1.5 }}>{record.summary}</div>
         </div>
         {(record.thumbUrl || record.imageThumb) && (
-          <img src={record.thumbUrl || record.imageThumb} alt="" style={{ width: 44, height: 44, borderRadius: 8, objectFit: "cover", marginLeft: 10, flexShrink: 0 }} />
+          <img src={record.thumbUrl || record.imageThumb} alt="" onClick={function(e) { e.stopPropagation(); setViewImage(record.imageUrl || record.imageData || record.thumbUrl || record.imageThumb); }} style={{ width: 44, height: 44, borderRadius: 8, objectFit: "cover", marginLeft: 10, flexShrink: 0, cursor: "pointer" }} />
         )}
       </div>
       {expanded && (
@@ -365,7 +606,7 @@ function RecordCard({ record, members, onDelete, onEdit }) {
             <div key={i} style={{ fontSize: 12, color: "#777", fontFamily: "'Noto Sans SC', sans-serif", paddingLeft: 4 }}>🔬 {test.name} {test.result && `— ${test.result}`}</div>
           ))}</div>}
           {record.notes && <div style={{ fontSize: 12, color: "#888", marginTop: 4, fontFamily: "'Noto Sans SC', sans-serif" }}>{record.notes}</div>}
-          {(record.imageUrl || record.imageData) && <img src={record.imageUrl || record.imageData} alt="原图" style={{ width: "100%", borderRadius: 8, marginTop: 8 }} />}
+          {(record.imageUrl || record.imageData) && <img src={record.imageUrl || record.imageData} alt="原图" onClick={function(e) { e.stopPropagation(); setViewImage(record.imageUrl || record.imageData); }} style={{ width: "100%", borderRadius: 8, marginTop: 8, cursor: "pointer" }} />}
           <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
             <button onClick={(e) => { e.stopPropagation(); setEditing(true); }} style={{
               padding: "4px 12px", fontSize: 12, color: "#4A7C6F", background: "#4A7C6F15",
@@ -378,51 +619,114 @@ function RecordCard({ record, members, onDelete, onEdit }) {
           </div>
         </div>
       )}
+      {viewImage && <ImageViewer src={viewImage} onClose={function() { setViewImage(null); }} />}
     </div>
   );
 }
 
-function QuickForm({ members, onSave, onCancel, defaultMemberId }) {
-  const [memberId, setMemberId] = useState(defaultMemberId || members[0]?.id);
-  const [type, setType] = useState("visit");
-  const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
-  const [summary, setSummary] = useState("");
-  const [hospital, setHospital] = useState("");
-  const [diagnosis, setDiagnosis] = useState("");
-  const [medText, setMedText] = useState("");
-  const [notes, setNotes] = useState("");
+function AiTextModal({ type, aiConfig, onResult, onClose }) {
+  var [text, setText] = useState("");
+  var [status, setStatus] = useState("idle");
 
-  const handleSave = () => {
-    if (!summary.trim()) return;
-    const meds = medText.split(/[,，\n]/).map((s) => s.trim()).filter(Boolean).map((s) => {
-      const parts = s.split(/[-—]/);
-      return { name: parts[0]?.trim() || s, dosage: parts[1]?.trim() || "" };
-    });
-    onSave({ id: createId(), memberId, type, date, summary: summary.trim(), hospital, diagnosis, medications: meds, tests: [], notes, createdAt: Date.now() });
+  var handleExtract = async function() {
+    if (!text.trim()) return;
+    if (!aiConfig || !aiConfig.apiKey) { alert("请先在设置中配置火山引擎 API"); return; }
+    setStatus("processing");
+    var result = await extractFromText(text, type, aiConfig);
+    if (result) { onResult(result); onClose(); }
+    else { setStatus("error"); }
   };
 
-  const inputStyle = {
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", zIndex: 100, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }} onClick={onClose}>
+      <div style={{ background: "#fff", borderRadius: 16, padding: 24, maxWidth: 420, width: "100%" }} onClick={function(e) { e.stopPropagation(); }}>
+        <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 8, fontFamily: "'Noto Sans SC', sans-serif" }}>AI 识别文字</div>
+        <div style={{ fontSize: 12, color: "#888", marginBottom: 12, fontFamily: "'Noto Sans SC', sans-serif" }}>粘贴或输入一段医疗相关的文字描述，AI 会自动提取信息并填入表单。</div>
+        <textarea value={text} onChange={function(e) { setText(e.target.value); }} placeholder="例如：4月10日去社区医院看了感冒，医生开了阿莫西林和布洛芬..." rows={6} style={{
+          width: "100%", padding: "12px", borderRadius: 10, border: "1.5px solid #e8e5e0", fontSize: 14,
+          fontFamily: "'Noto Sans SC', sans-serif", background: "#faf9f7", outline: "none", boxSizing: "border-box", resize: "vertical", marginBottom: 12,
+        }} autoFocus />
+        {status === "error" && <div style={{ fontSize: 12, color: "#c06b5d", marginBottom: 8, fontFamily: "'Noto Sans SC', sans-serif" }}>识别失败，请重试</div>}
+        <div style={{ display: "flex", gap: 10 }}>
+          <button onClick={onClose} style={{ flex: 1, padding: "10px", borderRadius: 12, border: "1.5px solid #e8e5e0", background: "#fff", fontSize: 14, color: "#888", cursor: "pointer", fontFamily: "'Noto Sans SC', sans-serif" }}>取消</button>
+          <button onClick={handleExtract} disabled={status === "processing" || !text.trim()} style={{
+            flex: 2, padding: "10px", borderRadius: 12, border: "none",
+            background: (text.trim() && status !== "processing") ? "#4A7C6F" : "#ccc", color: "#fff", fontSize: 14, fontWeight: 600,
+            cursor: (text.trim() && status !== "processing") ? "pointer" : "default", fontFamily: "'Noto Sans SC', sans-serif",
+          }}>{status === "processing" ? "识别中..." : "识别并填入"}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function QuickForm({ type, memberId, onSave, onCancel, aiConfig }) {
+  var [formState, setFormState] = useState({
+    date: new Date().toISOString().slice(0, 10), summary: "", hospital: "", doctor: "",
+    diagnosis: "", medText: "", testText: "", notes: "",
+  });
+  var [imgState, setImgState] = useState({ imageData: null, imageThumb: null, imageUrl: null, thumbUrl: null });
+  var [saving, setSaving] = useState(false);
+  var [showAiText, setShowAiText] = useState(false);
+
+  var handleAiResult = function(result) {
+    var medText = (result.medications || []).map(function(m) { return m.name + (m.dosage ? "—" + m.dosage : ""); }).join("，");
+    var testText = (result.tests || []).map(function(t) { return t.name + (t.result ? "—" + t.result : ""); }).join("，");
+    setFormState({
+      date: result.date || formState.date, summary: result.summary || formState.summary,
+      hospital: result.hospital || formState.hospital, doctor: result.doctor || formState.doctor,
+      diagnosis: result.diagnosis || formState.diagnosis, medText: medText || formState.medText,
+      testText: testText || formState.testText, notes: result.notes || formState.notes,
+    });
+  };
+
+  var handleSave = async function() {
+    if (!formState.summary.trim() || saving) return;
+    setSaving(true);
+    var id = createId();
+    var meds = (formState.medText || "").split(/[,，\n]/).map(function(s) { return s.trim(); }).filter(Boolean).map(function(s) {
+      var parts = s.split(/[-—]/); return { name: (parts[0] || s).trim(), dosage: (parts[1] || "").trim() };
+    });
+    var tests = (formState.testText || "").split(/[,，\n]/).map(function(s) { return s.trim(); }).filter(Boolean).map(function(s) {
+      var parts = s.split(/[-—]/); return { name: (parts[0] || s).trim(), result: (parts[1] || "").trim() };
+    });
+    var record = { id: id, memberId: memberId, type: type, date: formState.date, summary: formState.summary.trim(),
+      hospital: formState.hospital, doctor: formState.doctor, diagnosis: formState.diagnosis,
+      medications: meds, tests: tests, notes: formState.notes, createdAt: Date.now() };
+    if (imgState.imageData) {
+      if (tosHelper.isConfigured()) {
+        try {
+          record.imageUrl = await tosHelper.uploadBase64(imgState.imageData, id);
+          record.thumbUrl = await tosHelper.uploadThumb(imgState.imageThumb, id);
+        } catch (e) { record.imageData = imgState.imageData; record.imageThumb = imgState.imageThumb; }
+      } else { record.imageData = imgState.imageData; record.imageThumb = imgState.imageThumb; }
+    }
+    setSaving(false);
+    onSave(record);
+  };
+
+  var inputStyle = {
     width: "100%", padding: "10px 12px", borderRadius: 10, border: "1.5px solid #e8e5e0",
-    fontSize: 14, fontFamily: "'Noto Sans SC', sans-serif", background: "#faf9f7", outline: "none", boxSizing: "border-box", transition: "border-color 0.2s",
+    fontSize: 14, fontFamily: "'Noto Sans SC', sans-serif", background: "#faf9f7", outline: "none", boxSizing: "border-box",
   };
 
   return (
     <div style={{ padding: "0 0 20px" }}>
-      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 14 }}>
-        {members.map((m) => <MemberPill key={m.id} member={m} selected={memberId === m.id} onClick={() => setMemberId(m.id)} />)}
-      </div>
-      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 14 }}>
-        {RECORD_TYPES.map((t) => <TypeChip key={t.key} type={t} selected={type === t.key} onClick={() => setType(t.key)} />)}
-      </div>
-      <input type="date" value={date} onChange={(e) => setDate(e.target.value)} style={{ ...inputStyle, marginBottom: 10 }} />
-      <input placeholder="一句话概要 *（如：社区医院诊断轻度肺炎）" value={summary} onChange={(e) => setSummary(e.target.value)} style={{ ...inputStyle, marginBottom: 10 }} autoFocus />
-      <input placeholder="医院（选填）" value={hospital} onChange={(e) => setHospital(e.target.value)} style={{ ...inputStyle, marginBottom: 10 }} />
-      <input placeholder="诊断（选填）" value={diagnosis} onChange={(e) => setDiagnosis(e.target.value)} style={{ ...inputStyle, marginBottom: 10 }} />
-      <input placeholder="用药，逗号分隔（选填，如：阿奇霉素—5次点滴，顺尔宁4mg）" value={medText} onChange={(e) => setMedText(e.target.value)} style={{ ...inputStyle, marginBottom: 10 }} />
-      <textarea placeholder="其他备注（选填）" value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} style={{ ...inputStyle, marginBottom: 14, resize: "vertical" }} />
+      {showAiText && <AiTextModal type={type} aiConfig={aiConfig} onResult={handleAiResult} onClose={function() { setShowAiText(false); }} />}
+      <TypedFormFields type={type} state={formState} setState={setFormState} inputStyle={inputStyle} />
+      <ImageAttachment imageUrl={imgState.imageUrl} imageData={imgState.imageData} imageThumb={imgState.imageThumb} thumbUrl={imgState.thumbUrl} onChange={setImgState} />
+      <button onClick={function() { setShowAiText(true); }} style={{
+        width: "100%", padding: "10px", borderRadius: 10, border: "1.5px solid #5B7FA5", background: "#5B7FA518",
+        fontSize: 13, color: "#5B7FA5", cursor: "pointer", fontFamily: "'Noto Sans SC', sans-serif", marginBottom: 12,
+        display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
+      }}>
+        <span>🤖</span> AI 识别文字
+      </button>
       <div style={{ display: "flex", gap: 10 }}>
         <button onClick={onCancel} style={{ flex: 1, padding: "12px", borderRadius: 12, border: "1.5px solid #e8e5e0", background: "#fff", fontSize: 14, color: "#888", cursor: "pointer", fontFamily: "'Noto Sans SC', sans-serif" }}>取消</button>
-        <button onClick={handleSave} style={{ flex: 2, padding: "12px", borderRadius: 12, border: "none", background: summary.trim() ? "#4A7C6F" : "#ccc", color: "#fff", fontSize: 14, fontWeight: 600, cursor: summary.trim() ? "pointer" : "default", fontFamily: "'Noto Sans SC', sans-serif", transition: "background 0.2s" }}>保存记录</button>
+        <button onClick={handleSave} disabled={saving} style={{ flex: 2, padding: "12px", borderRadius: 12, border: "none", background: (formState.summary.trim() && !saving) ? "#4A7C6F" : "#ccc", color: "#fff", fontSize: 14, fontWeight: 600, cursor: (formState.summary.trim() && !saving) ? "pointer" : "default", fontFamily: "'Noto Sans SC', sans-serif" }}>
+          {saving ? "保存中..." : "保存记录"}
+        </button>
       </div>
     </div>
   );
@@ -558,13 +862,16 @@ function MemberManager({ members, onUpdate }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(members);
   const [newName, setNewName] = useState("");
-  const avatars = ["👤", "👧", "👩", "👦", "👴", "👵", "🧒", "👶"];
+  const [newEmoji, setNewEmoji] = useState("👤");
   const colors = ["#4A7C6F", "#C06B5D", "#7B6B8D", "#5B7FA5", "#A08C5B", "#5BA07C"];
 
+  var updateMemberField = function(id, field, value) {
+    setDraft(draft.map(function(m) { return m.id === id ? Object.assign({}, m, {[field]: value}) : m; }));
+  };
   const handleAdd = () => {
-    if (!newName.trim() || draft.length >= 6) return;
-    setDraft([...draft, { id: createId(), name: newName.trim(), avatar: avatars[draft.length % avatars.length], color: colors[draft.length % colors.length] }]);
-    setNewName("");
+    if (!newName.trim() || draft.length >= 8) return;
+    setDraft([...draft, { id: createId(), name: newName.trim(), avatar: newEmoji || "👤", color: colors[draft.length % colors.length] }]);
+    setNewName(""); setNewEmoji("👤");
   };
   const handleRemove = (id) => { if (draft.length <= 1) return; setDraft(draft.filter((m) => m.id !== id)); };
   const handleSave = () => { onUpdate(draft); setEditing(false); };
@@ -579,9 +886,15 @@ function MemberManager({ members, onUpdate }) {
   return (
     <div style={{ background: "#fff", borderRadius: 14, padding: 16, marginBottom: 16, boxShadow: "0 2px 12px rgba(0,0,0,0.08)" }}>
       {draft.map((m) => (
-        <div key={m.id} style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
-          <span style={{ fontSize: 20 }}>{m.avatar}</span>
-          <span style={{ flex: 1, fontSize: 14, fontFamily: "'Noto Sans SC', sans-serif" }}>{m.name}</span>
+        <div key={m.id} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+          <input value={m.avatar} onChange={function(e) { updateMemberField(m.id, "avatar", e.target.value); }} style={{
+            width: 36, height: 36, textAlign: "center", fontSize: 20, padding: 0, borderRadius: 8,
+            border: "1.5px solid #e8e5e0", background: "#faf9f7", outline: "none",
+          }} />
+          <input value={m.name} onChange={function(e) { updateMemberField(m.id, "name", e.target.value); }} style={{
+            flex: 1, padding: "6px 10px", borderRadius: 8, border: "1.5px solid #e8e5e0",
+            fontSize: 14, fontFamily: "'Noto Sans SC', sans-serif", outline: "none",
+          }} />
           {draft.length > 1 && (
             <button onClick={() => handleRemove(m.id)} style={{
               width: 24, height: 24, borderRadius: "50%", border: "none", background: "#f5e6e3",
@@ -590,8 +903,12 @@ function MemberManager({ members, onUpdate }) {
           )}
         </div>
       ))}
-      {draft.length < 6 && (
+      {draft.length < 8 && (
         <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+          <input value={newEmoji} onChange={(e) => setNewEmoji(e.target.value)} placeholder="😀" style={{
+            width: 36, height: 36, textAlign: "center", fontSize: 18, padding: 0, borderRadius: 8,
+            border: "1.5px solid #e8e5e0", background: "#faf9f7", outline: "none",
+          }} />
           <input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="新成员姓名" style={{
             flex: 1, padding: "8px 12px", borderRadius: 10, border: "1.5px solid #e8e5e0", fontSize: 13, fontFamily: "'Noto Sans SC', sans-serif", outline: "none",
           }} onKeyDown={(e) => e.key === "Enter" && handleAdd()} />
@@ -814,7 +1131,9 @@ function MedicalRecords() {
   const [records, setRecords] = useState([]);
   const [deletedIds, setDeletedIds] = useState([]);
   const [filterMember, setFilterMember] = useState("all");
-  const [mode, setMode] = useState("list");
+  const [mode, setMode] = useState("list"); // list | photo | select-member | select-type | form
+  const [formMemberId, setFormMemberId] = useState(null);
+  const [formType, setFormType] = useState(null);
   const [loaded, setLoaded] = useState(false);
   const [aiConfig, setAiConfig] = useState(() => {
     try { return JSON.parse(localStorage.getItem("volcengine-config") || "{}"); } catch { return {}; }
@@ -1031,10 +1350,68 @@ function MedicalRecords() {
       </div>
 
       <div style={{ padding: "16px 16px 100px" }}>
-        {mode !== "list" && (
+        {mode === "photo" && (
           <div style={{ background: "#fff", borderRadius: 16, padding: 16, marginBottom: 16, boxShadow: "0 2px 12px rgba(0,0,0,0.06)" }}>
-            <div style={{ fontSize: 15, fontWeight: 600, color: "#333", marginBottom: 14 }}>{mode === "photo" ? "📸 拍照识别" : "✏️ 快速记录"}</div>
-            {mode === "photo" ? <PhotoCapture members={members} onSave={addRecord} onCancel={() => setMode("list")} aiConfig={aiConfig} defaultMemberId={filterMember !== "all" ? filterMember : null} /> : <QuickForm members={members} onSave={addRecord} onCancel={() => setMode("list")} defaultMemberId={filterMember !== "all" ? filterMember : null} />}
+            <div style={{ fontSize: 15, fontWeight: 600, color: "#333", marginBottom: 14 }}>📸 拍照识别</div>
+            <PhotoCapture members={members} onSave={addRecord} onCancel={function() { setMode("list"); }} aiConfig={aiConfig} defaultMemberId={filterMember !== "all" ? filterMember : null} />
+          </div>
+        )}
+
+        {mode === "select-member" && (
+          <div style={{ background: "#fff", borderRadius: 16, padding: 20, marginBottom: 16, boxShadow: "0 2px 12px rgba(0,0,0,0.06)" }}>
+            <div style={{ fontSize: 15, fontWeight: 600, color: "#333", marginBottom: 4, fontFamily: "'Noto Sans SC', sans-serif" }}>选择成员</div>
+            <div style={{ fontSize: 12, color: "#aaa", marginBottom: 16, fontFamily: "'Noto Sans SC', sans-serif" }}>这条记录属于谁？</div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              {members.map(function(m) { return (
+                <button key={m.id} onClick={function() { setFormMemberId(m.id); setMode("select-type"); }} style={{
+                  display: "flex", alignItems: "center", gap: 12, padding: "14px 16px", borderRadius: 12,
+                  border: "1.5px solid #e8e5e0", background: "#faf9f7", cursor: "pointer", transition: "all 0.15s",
+                  fontFamily: "'Noto Sans SC', sans-serif",
+                }}>
+                  <span style={{ fontSize: 28 }}>{m.avatar}</span>
+                  <span style={{ fontSize: 16, fontWeight: 500, color: m.color }}>{m.name}</span>
+                </button>
+              ); })}
+            </div>
+            <button onClick={function() { setMode("list"); }} style={{
+              width: "100%", marginTop: 14, padding: "10px", borderRadius: 12, border: "1.5px solid #e8e5e0",
+              background: "#fff", fontSize: 14, color: "#888", cursor: "pointer", fontFamily: "'Noto Sans SC', sans-serif",
+            }}>取消</button>
+          </div>
+        )}
+
+        {mode === "select-type" && (
+          <div style={{ background: "#fff", borderRadius: 16, padding: 20, marginBottom: 16, boxShadow: "0 2px 12px rgba(0,0,0,0.06)" }}>
+            <div style={{ fontSize: 15, fontWeight: 600, color: "#333", marginBottom: 4, fontFamily: "'Noto Sans SC', sans-serif" }}>选择类型</div>
+            <div style={{ fontSize: 12, color: "#aaa", marginBottom: 16, fontFamily: "'Noto Sans SC', sans-serif" }}>
+              {(function() { var m = members.find(function(x) { return x.id === formMemberId; }); return m ? m.avatar + " " + m.name : ""; })()}  ·  记录什么内容？
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              {RECORD_TYPES.map(function(t) { return (
+                <button key={t.key} onClick={function() { setFormType(t.key); setMode("form"); }} style={{
+                  display: "flex", alignItems: "center", gap: 12, padding: "14px 16px", borderRadius: 12,
+                  border: "1.5px solid #e8e5e0", background: "#faf9f7", cursor: "pointer", transition: "all 0.15s",
+                  fontFamily: "'Noto Sans SC', sans-serif",
+                }}>
+                  <span style={{ fontSize: 24 }}>{t.icon}</span>
+                  <span style={{ fontSize: 15, fontWeight: 500, color: "#333" }}>{t.label}</span>
+                </button>
+              ); })}
+            </div>
+            <button onClick={function() { setMode("select-member"); }} style={{
+              width: "100%", marginTop: 14, padding: "10px", borderRadius: 12, border: "1.5px solid #e8e5e0",
+              background: "#fff", fontSize: 14, color: "#888", cursor: "pointer", fontFamily: "'Noto Sans SC', sans-serif",
+            }}>返回</button>
+          </div>
+        )}
+
+        {mode === "form" && formType && (
+          <div style={{ background: "#fff", borderRadius: 16, padding: 16, marginBottom: 16, boxShadow: "0 2px 12px rgba(0,0,0,0.06)" }}>
+            <div style={{ fontSize: 15, fontWeight: 600, color: "#333", marginBottom: 14, fontFamily: "'Noto Sans SC', sans-serif" }}>
+              {(function() { var t = RECORD_TYPES.find(function(x) { return x.key === formType; }); return t ? t.icon + " " + t.label : ""; })()}
+              <span style={{ fontSize: 12, color: "#aaa", fontWeight: 400, marginLeft: 8 }}>{(function() { var m = members.find(function(x) { return x.id === formMemberId; }); return m ? m.avatar + " " + m.name : ""; })()}</span>
+            </div>
+            <QuickForm type={formType} memberId={formMemberId} onSave={addRecord} onCancel={function() { setMode("list"); }} aiConfig={aiConfig} />
           </div>
         )}
         {mode === "list" && (
@@ -1072,7 +1449,7 @@ function MedicalRecords() {
             fontSize: 24, cursor: "pointer", boxShadow: "0 4px 16px rgba(74,124,111,0.4)",
             display: "flex", alignItems: "center", justifyContent: "center", transition: "transform 0.15s",
           }} onMouseDown={(e) => (e.currentTarget.style.transform = "scale(0.92)")} onMouseUp={(e) => (e.currentTarget.style.transform = "scale(1)")}>📸</button>
-          <button onClick={() => setMode("form")} style={{
+          <button onClick={function() { var mid = filterMember !== "all" ? filterMember : null; if (mid) { setFormMemberId(mid); setMode("select-type"); } else { setMode("select-member"); } }} style={{
             width: 56, height: 56, borderRadius: "50%", border: "none", background: "#5B7FA5", color: "#fff",
             fontSize: 24, cursor: "pointer", boxShadow: "0 4px 16px rgba(91,127,165,0.4)",
             display: "flex", alignItems: "center", justifyContent: "center", transition: "transform 0.15s",
