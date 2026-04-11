@@ -320,8 +320,8 @@ function RecordCard({ record, members, onDelete, onEdit }) {
   );
 }
 
-function QuickForm({ members, onSave, onCancel }) {
-  const [memberId, setMemberId] = useState(members[0]?.id);
+function QuickForm({ members, onSave, onCancel, defaultMemberId }) {
+  const [memberId, setMemberId] = useState(defaultMemberId || members[0]?.id);
   const [type, setType] = useState("visit");
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
   const [summary, setSummary] = useState("");
@@ -366,8 +366,8 @@ function QuickForm({ members, onSave, onCancel }) {
   );
 }
 
-function PhotoCapture({ members, onSave, onCancel, aiConfig }) {
-  const [memberId, setMemberId] = useState(members[0]?.id);
+function PhotoCapture({ members, onSave, onCancel, aiConfig, defaultMemberId }) {
+  const [memberId, setMemberId] = useState(defaultMemberId || members[0]?.id);
   const [status, setStatus] = useState("idle");
   const [extracted, setExtracted] = useState(null);
   const [imageData, setImageData] = useState(null);
@@ -904,7 +904,7 @@ function MedicalRecords() {
         {mode !== "list" && (
           <div style={{ background: "#fff", borderRadius: 16, padding: 16, marginBottom: 16, boxShadow: "0 2px 12px rgba(0,0,0,0.06)" }}>
             <div style={{ fontSize: 15, fontWeight: 600, color: "#333", marginBottom: 14 }}>{mode === "photo" ? "📸 拍照识别" : "✏️ 快速记录"}</div>
-            {mode === "photo" ? <PhotoCapture members={members} onSave={addRecord} onCancel={() => setMode("list")} aiConfig={aiConfig} /> : <QuickForm members={members} onSave={addRecord} onCancel={() => setMode("list")} />}
+            {mode === "photo" ? <PhotoCapture members={members} onSave={addRecord} onCancel={() => setMode("list")} aiConfig={aiConfig} defaultMemberId={filterMember !== "all" ? filterMember : null} /> : <QuickForm members={members} onSave={addRecord} onCancel={() => setMode("list")} defaultMemberId={filterMember !== "all" ? filterMember : null} />}
           </div>
         )}
         {mode === "list" && (
