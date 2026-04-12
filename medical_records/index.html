@@ -23,6 +23,7 @@ const { useState, useEffect, useRef, useCallback } = React;
 const STORAGE_KEY = "family-medical-records";
 const GIST_CONFIG_KEY = "gist-sync-config";
 const GIST_FILENAME = "medical-records.json";
+const DELETED_MEMBER_IDS_KEY = "deleted-member-ids";
 
 const storage = {
   async load() {
@@ -94,11 +95,22 @@ const gistSync = {
   },
 
   mergeData(local, remote) {
-    // Merge members: use local as base, add any remote-only members
+    // Merge members while honoring tombstones from both sides
     const localMembers = local.members || [];
     const remoteMembers = remote.members || [];
-    const memberIds = new Set(localMembers.map(m => m.id));
-    const mergedMembers = [...localMembers, ...remoteMembers.filter(m => !memberIds.has(m.id))];
+    const deletedMemberIds = new Set([...(local.deletedMemberIds || []), ...(remote.deletedMemberIds || [])]);
+    const memberMap = new Map();
+    for (const m of remoteMembers) {
+      if (!deletedMemberIds.has(m.id)) memberMap.set(m.id, m);
+    }
+    for (const m of localMembers) {
+      if (deletedMemberIds.has(m.id)) {
+        memberMap.delete(m.id);
+        continue;
+      }
+      memberMap.set(m.id, m);
+    }
+    const mergedMembers = [...memberMap.values()];
 
     // Collect deleted IDs from both sides
     const deletedIds = new Set([...(local.deletedIds || []), ...(remote.deletedIds || [])]);
@@ -116,7 +128,7 @@ const gistSync = {
       }
     }
     const mergedRecords = [...recordMap.values()].sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
-    return { members: mergedMembers, records: mergedRecords, deletedIds: [...deletedIds] };
+    return { members: mergedMembers, records: mergedRecords, deletedIds: [...deletedIds], deletedMemberIds: [...deletedMemberIds] };
   },
 };
 
@@ -1225,6 +1237,7 @@ function MedicalRecords() {
   const [members, setMembers] = useState([]);
   const [records, setRecords] = useState([]);
   const [deletedIds, setDeletedIds] = useState([]);
+  const [deletedMemberIds, setDeletedMemberIds] = useState([]);
   const [filterMember, setFilterMember] = useState("all");
   const [mode, setMode] = useState("list"); // list | photo | select-member | select-type | form
   const [formMemberId, setFormMemberId] = useState(null);
@@ -1252,8 +1265,9 @@ function MedicalRecords() {
           const remote = await gistSync.pull(cfg.token, cfg.gistId);
           const local = data || { members: [], records: [] };
           const localDeleted = JSON.parse(localStorage.getItem("deleted-record-ids") || "[]");
-          const localForSync = { members: local.members, records: (local.records || []).map(r => { return stripBase64(r); }), deletedIds: localDeleted };
-          const merged = gistSync.mergeData(localForSync, { members: remote.members || [], records: remote.records || [], deletedIds: remote.deletedIds || [] });
+          const localDeletedMembers = JSON.parse(localStorage.getItem(DELETED_MEMBER_IDS_KEY) || "[]");
+          const localForSync = { members: local.members, records: (local.records || []).map(r => { return stripBase64(r); }), deletedIds: localDeleted, deletedMemberIds: localDeletedMembers };
+          const merged = gistSync.mergeData(localForSync, { members: remote.members || [], records: remote.records || [], deletedIds: remote.deletedIds || [], deletedMemberIds: remote.deletedMemberIds || [] });
           // Restore local images
           const localImageMap = new Map();
           (local.records || []).forEach(r => { if (r.imageData) localImageMap.set(r.id, { imageData: r.imageData, imageThumb: r.imageThumb }); });
@@ -1264,7 +1278,9 @@ function MedicalRecords() {
           setMembers(merged.members);
           setRecords(finalRecords);
           setDeletedIds(merged.deletedIds || []);
+          setDeletedMemberIds(merged.deletedMemberIds || []);
           localStorage.setItem("deleted-record-ids", JSON.stringify(merged.deletedIds || []));
+          localStorage.setItem(DELETED_MEMBER_IDS_KEY, JSON.stringify(merged.deletedMemberIds || []));
           await storage.save({ members: merged.members, records: finalRecords });
           // Restore aiConfig from Gist if local is empty
           if (remote.aiConfig && remote.aiConfig.apiKey) {
@@ -1288,8 +1304,12 @@ function MedicalRecords() {
           setTimeout(() => setSyncStatus(""), 3000);
         }
       }
-      // Fallback: if no members after load+sync (brand new install), use defaults
-      setMembers(function(cur) { return cur.length > 0 ? cur : DEFAULT_MEMBERS; });
+      // Fallback: if no members after load+sync (brand new install), use defaults minus deletions
+      setMembers(function(cur) {
+        if (cur.length > 0) return cur;
+        const deleted = new Set(JSON.parse(localStorage.getItem(DELETED_MEMBER_IDS_KEY) || "[]"));
+        return DEFAULT_MEMBERS.filter(function(m) { return !deleted.has(m.id); });
+      });
     });
   }, []);
 
@@ -1304,8 +1324,9 @@ function MedicalRecords() {
     var m = newMembers || members;
     var r = newRecords || records;
     var d = newDeletedIds || JSON.parse(localStorage.getItem("deleted-record-ids") || "[]");
+    var dm = JSON.parse(localStorage.getItem(DELETED_MEMBER_IDS_KEY) || "[]");
     var cfg = gistSync.getConfig();
-    var pushData = { members: m, records: r.map(function(rec) { return stripBase64(rec); }), deletedIds: d };
+    var pushData = { members: m, records: r.map(function(rec) { return stripBase64(rec); }), deletedIds: d, deletedMemberIds: dm };
     var currentAi = JSON.parse(localStorage.getItem("volcengine-config") || "{}");
     gistSync.push(cfg.token, cfg.gistId, pushData, currentAi).catch(function(e) { console.error("Push failed:", e); });
   }, [members, records]);
@@ -1349,8 +1370,9 @@ function MedicalRecords() {
       var remote = await gistSync.pull(cfg.token, cfg.gistId);
       var local = await storage.load() || { members: [], records: [] };
       var localDeleted = JSON.parse(localStorage.getItem("deleted-record-ids") || "[]");
-      var localForSync = { members: local.members, records: (local.records || []).map(function(r) { return stripBase64(r); }), deletedIds: localDeleted };
-      var remoteClean = { members: remote.members || [], records: remote.records || [], deletedIds: remote.deletedIds || [] };
+      var localDeletedMembers = JSON.parse(localStorage.getItem(DELETED_MEMBER_IDS_KEY) || "[]");
+      var localForSync = { members: local.members, records: (local.records || []).map(function(r) { return stripBase64(r); }), deletedIds: localDeleted, deletedMemberIds: localDeletedMembers };
+      var remoteClean = { members: remote.members || [], records: remote.records || [], deletedIds: remote.deletedIds || [], deletedMemberIds: remote.deletedMemberIds || [] };
       var merged = gistSync.mergeData(localForSync, remoteClean);
       // Push
       var currentAi = JSON.parse(localStorage.getItem("volcengine-config") || "{}");
@@ -1363,7 +1385,9 @@ function MedicalRecords() {
       setMembers(merged.members);
       setRecords(finalRecords);
       setDeletedIds(merged.deletedIds || []);
+      setDeletedMemberIds(merged.deletedMemberIds || []);
       localStorage.setItem("deleted-record-ids", JSON.stringify(merged.deletedIds || []));
+      localStorage.setItem(DELETED_MEMBER_IDS_KEY, JSON.stringify(merged.deletedMemberIds || []));
       await storage.save({ members: merged.members, records: finalRecords });
       // Restore aiConfig
       if (!currentAi.apiKey && remote.aiConfig && remote.aiConfig.apiKey) {
@@ -1440,7 +1464,15 @@ function MedicalRecords() {
               padding: "6px 10px", borderRadius: 10, border: "1.5px solid rgba(255,255,255,0.3)", background: "rgba(255,255,255,0.15)",
               fontSize: 14, color: "rgba(255,255,255,0.8)", cursor: "pointer",
             }} title="火山引擎配置">⚙️</button>
-            <MemberManager members={members} onUpdate={setMembers} />
+            <MemberManager members={members} onUpdate={function(nextMembers) {
+              const nextIds = new Set(nextMembers.map(function(m) { return m.id; }));
+              const removedIds = members.filter(function(m) { return !nextIds.has(m.id); }).map(function(m) { return m.id; });
+              const nextDeletedMemberIds = removedIds.length ? Array.from(new Set(deletedMemberIds.concat(removedIds))) : deletedMemberIds;
+              setDeletedMemberIds(nextDeletedMemberIds);
+              localStorage.setItem(DELETED_MEMBER_IDS_KEY, JSON.stringify(nextDeletedMemberIds));
+              setMembers(nextMembers);
+              setTimeout(function() { pushNow(nextMembers); }, 100);
+            }} />
           </div>
         </div>
       </div>
