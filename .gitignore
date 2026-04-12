@@ -64,3 +64,6 @@ pids
 
 # Dependency directories
 node_modules/
+
+# Medical records - personal directory
+medical_records/only_for_me/
