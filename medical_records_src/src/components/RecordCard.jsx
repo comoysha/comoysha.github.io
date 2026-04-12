@@ -5,7 +5,7 @@ import ImageViewer from './ImageViewer.jsx';
 import EditForm from './EditForm.jsx';
 import ConfirmDialog from './ConfirmDialog.jsx';
 
-export default function RecordCard({ record, members, onDelete, onEdit }) {
+export default function RecordCard({ record, members, onDelete, onEdit, compact = false }) {
   const [expanded, setExpanded] = useState(false);
   const [editing, setEditing] = useState(false);
   const [viewImage, setViewImage] = useState(null);

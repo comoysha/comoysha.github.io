@@ -1,5 +1,6 @@
-import { useState, useEffect, useCallback } from 'react';
-import { DEFAULT_MEMBERS, RECORD_TYPES, DELETED_MEMBER_IDS_KEY } from './constants.js';
+import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useMediaQuery } from './hooks/useMediaQuery.js';
+import { RECORD_TYPES, DELETED_MEMBER_IDS_KEY } from './constants.js';
 import { storage } from './services/storage.js';
 import { gistSync } from './services/gistSync.js';
 import { tosHelper } from './services/tosHelper.js';
@@ -11,8 +12,12 @@ import MemberPill from './components/MemberPill.jsx';
 import RecordCard from './components/RecordCard.jsx';
 import PhotoCapture from './components/PhotoCapture.jsx';
 import QuickForm from './components/QuickForm.jsx';
+import DesktopLayout from './components/DesktopLayout.jsx';
+import SearchBar from './components/SearchBar.jsx';
+import TypeChip from './components/TypeChip.jsx';
 
 export default function MedicalRecords() {
+  const isDesktop = useMediaQuery('(min-width: 768px)');
   const [members, setMembers] = useState([]);
   const [records, setRecords] = useState([]);
   const [deletedIds, setDeletedIds] = useState([]);
@@ -25,6 +30,13 @@ export default function MedicalRecords() {
   const [aiConfig, setAiConfig] = useState(() => {
     try { return JSON.parse(localStorage.getItem("volcengine-config") || "{}"); } catch { return {}; }
   });
+  const [filterType, setFilterType] = useState("all");
+  const [filterDateRange, setFilterDateRange] = useState({ from: "", to: "" });
+  const [searchText, setSearchText] = useState("");
+  const [viewMode, setViewMode] = useState("card");
+  const [sortBy, setSortBy] = useState("date-desc");
+  const [groupBy, setGroupBy] = useState("month");
+  const [showMobileSearch, setShowMobileSearch] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showSync, setShowSync] = useState(false);
   const [syncStatus, setSyncStatus] = useState("");
@@ -59,6 +71,10 @@ export default function MedicalRecords() {
           localStorage.setItem("deleted-record-ids", JSON.stringify(merged.deletedIds || []));
           localStorage.setItem(DELETED_MEMBER_IDS_KEY, JSON.stringify(merged.deletedMemberIds || []));
           await storage.save({ members: merged.members, records: finalRecords });
+          // Push merged result back to gist to propagate tombstones
+          const currentAi = JSON.parse(localStorage.getItem("volcengine-config") || "{}");
+          const tc = tosHelper.getConfig();
+          gistSync.push(cfg.token, cfg.gistId, { members: merged.members, records: merged.records, deletedIds: merged.deletedIds, deletedMemberIds: merged.deletedMemberIds }, (currentAi && currentAi.apiKey) ? currentAi : (remote.aiConfig || {}), (tc && tc.accessKeyId) ? tc : (remote.tosConfig || undefined)).catch(function(e) { console.error("Auto sync push-back failed:", e); });
           if (remote.aiConfig && remote.aiConfig.apiKey) {
             const localAi = JSON.parse(localStorage.getItem("volcengine-config") || "{}");
             if (!localAi.apiKey) {
@@ -79,11 +95,7 @@ export default function MedicalRecords() {
           setTimeout(() => setSyncStatus(""), 3000);
         }
       }
-      setMembers(function(cur) {
-        if (cur.length > 0) return cur;
-        const deleted = new Set(JSON.parse(localStorage.getItem(DELETED_MEMBER_IDS_KEY) || "[]"));
-        return DEFAULT_MEMBERS.filter(function(m) { return !deleted.has(m.id); });
-      });
+      // No DEFAULT_MEMBERS fallback — members are managed via MemberManager
     });
   }, []);
 
@@ -199,14 +211,56 @@ export default function MedicalRecords() {
     URL.revokeObjectURL(url);
   };
 
-  const filtered = filterMember === "all" ? records : records.filter((r) => r.memberId === filterMember);
-  const sorted = [...filtered].sort((a, b) => { const da = a.date || ""; const db = b.date || ""; if (da !== db) return db.localeCompare(da); return (b.createdAt || 0) - (a.createdAt || 0); });
+  const filtered = useMemo(() => {
+    let result = records;
+    if (filterMember !== "all") result = result.filter((r) => r.memberId === filterMember);
+    if (filterType !== "all") result = result.filter((r) => r.type === filterType);
+    if (filterDateRange.from) result = result.filter((r) => (r.date || "") >= filterDateRange.from);
+    if (filterDateRange.to) result = result.filter((r) => (r.date || "") <= filterDateRange.to);
+    if (searchText.trim()) {
+      const q = searchText.trim().toLowerCase();
+      result = result.filter((r) => {
+        const fields = [r.summary, r.hospital, r.doctor, r.diagnosis, r.notes];
+        if (r.medications) r.medications.forEach((m) => fields.push(m.name));
+        if (r.tests) r.tests.forEach((t) => fields.push(t.name));
+        return fields.some((f) => f && f.toLowerCase().includes(q));
+      });
+    }
+    return result;
+  }, [records, filterMember, filterType, filterDateRange, searchText]);
 
-  const groups = {};
-  sorted.forEach((r) => { const key = r.date ? r.date.slice(0, 7) : "未知日期"; if (!groups[key]) groups[key] = []; groups[key].push(r); });
+  const sorted = useMemo(() => {
+    const arr = [...filtered];
+    switch (sortBy) {
+      case "date-asc":
+        return arr.sort((a, b) => (a.date || "").localeCompare(b.date || "") || (a.createdAt || 0) - (b.createdAt || 0));
+      case "type":
+        return arr.sort((a, b) => (a.type || "").localeCompare(b.type || "") || (b.date || "").localeCompare(a.date || ""));
+      case "member":
+        return arr.sort((a, b) => (a.memberId || "").localeCompare(b.memberId || "") || (b.date || "").localeCompare(a.date || ""));
+      default: // date-desc
+        return arr.sort((a, b) => (b.date || "").localeCompare(a.date || "") || (b.createdAt || 0) - (a.createdAt || 0));
+    }
+  }, [filtered, sortBy]);
+
+  const groups = useMemo(() => {
+    const g = {};
+    sorted.forEach((r) => {
+      let key;
+      switch (groupBy) {
+        case "type": key = r.type || "unknown"; break;
+        case "member": key = r.memberId || "unknown"; break;
+        case "none": key = "all"; break;
+        default: key = r.date ? r.date.slice(0, 7) : "未知日期";
+      }
+      if (!g[key]) g[key] = [];
+      g[key].push(r);
+    });
+    return g;
+  }, [sorted, groupBy]);
 
   return (
-    <div style={{ maxWidth: 480, margin: "0 auto", minHeight: "100vh", background: "#F5F3F0", fontFamily: "'Noto Sans SC', sans-serif" }}>
+    <div style={{ maxWidth: isDesktop ? 1200 : 480, margin: "0 auto", minHeight: "100vh", background: "#F5F3F0", fontFamily: "'Noto Sans SC', sans-serif" }}>
       {showSettings && <SettingsModal aiConfig={aiConfig} onSave={saveAiConfig} onClose={() => setShowSettings(false)} onPush={pushNow} />}
       {showSync && <SyncSettingsModal onClose={() => setShowSync(false)} onSyncDone={handleSyncDone} aiConfig={aiConfig} />}
       <div style={{ background: "linear-gradient(135deg, #4A7C6F 0%, #3D6B5F 100%)", padding: "20px 20px 16px", position: "sticky", top: 0, zIndex: 10 }}>
@@ -311,15 +365,45 @@ export default function MedicalRecords() {
             <QuickForm type={formType} memberId={formMemberId} onSave={addRecord} onCancel={function() { setMode("list"); }} aiConfig={aiConfig} />
           </div>
         )}
-        {mode === "list" && (
+        {mode === "list" && isDesktop && (
+          <DesktopLayout
+            members={members} records={sorted} groups={groups}
+            totalCount={records.length} filteredCount={filtered.length}
+            filterMember={filterMember} onFilterMember={setFilterMember}
+            filterType={filterType} onFilterType={setFilterType}
+            filterDateRange={filterDateRange} onFilterDateRange={setFilterDateRange}
+            searchText={searchText} onSearchText={setSearchText}
+            viewMode={viewMode} onViewMode={setViewMode}
+            sortBy={sortBy} onSortBy={setSortBy}
+            groupBy={groupBy} onGroupBy={setGroupBy}
+            onDelete={deleteRecord} onEdit={editRecord}
+            onClearFilters={() => { setFilterMember("all"); setFilterType("all"); setFilterDateRange({ from: "", to: "" }); setSearchText(""); }}
+          />
+        )}
+        {mode === "list" && !isDesktop && (
           <>
-            <div style={{ display: "flex", gap: 6, marginBottom: 16, overflowX: "auto", paddingBottom: 4 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
+              {showMobileSearch ? (
+                <SearchBar value={searchText} onChange={setSearchText} />
+              ) : null}
+              <button onClick={() => setShowMobileSearch(!showMobileSearch)} style={{
+                padding: "6px 10px", borderRadius: 10, border: "1.5px solid #e8e5e0",
+                background: showMobileSearch || searchText ? "#4A7C6F18" : "#fff",
+                color: showMobileSearch || searchText ? "#4A7C6F" : "#999",
+                fontSize: 14, cursor: "pointer", flexShrink: 0,
+              }}>🔍</button>
+            </div>
+            <div style={{ display: "flex", gap: 6, marginBottom: 10, overflowX: "auto", paddingBottom: 4 }}>
               <button onClick={() => setFilterMember("all")} style={{
                 padding: "5px 14px", borderRadius: 16, border: filterMember === "all" ? "2px solid #4A7C6F" : "2px solid transparent",
                 background: filterMember === "all" ? "#4A7C6F18" : "#fff", color: filterMember === "all" ? "#4A7C6F" : "#999",
                 fontSize: 13, fontWeight: filterMember === "all" ? 600 : 400, cursor: "pointer", whiteSpace: "nowrap", fontFamily: "'Noto Sans SC', sans-serif",
               }}>全部</button>
               {members.map((m) => <MemberPill key={m.id} member={m} selected={filterMember === m.id} onClick={() => setFilterMember(m.id)} />)}
+            </div>
+            <div style={{ display: "flex", gap: 6, marginBottom: 16, overflowX: "auto", paddingBottom: 4 }}>
+              <TypeChip type={{ icon: "📁", label: "全部" }} selected={filterType === "all"} onClick={() => setFilterType("all")} />
+              {RECORD_TYPES.map((t) => <TypeChip key={t.key} type={t} selected={filterType === t.key} onClick={() => setFilterType(t.key)} />)}
             </div>
             {Object.keys(groups).length === 0 ? (
               <div style={{ textAlign: "center", padding: "60px 20px", color: "#bbb" }}>
