@@ -1,13 +1,13 @@
 # 家庭诊疗记录
 
-纯前端单文件 React 应用，用于记录家庭成员的就诊、用药、检查、症状等医疗信息。通过 GitHub Gist 实现跨设备同步，通过火山引擎 TOS 存储图片，通过火山引擎 AI 实现拍照/文字识别。
+Vite + React 模块化前端应用，用于记录家庭成员的就诊、用药、检查、症状等医疗信息。通过 GitHub Gist 实现跨设备同步，通过火山引擎 TOS 存储图片，通过火山引擎 AI 实现拍照/文字识别。
 
 ## 技术栈
 
 | 技术 | 说明 |
 |------|------|
-| React 18 | CDN 加载，production build |
-| Babel standalone | 浏览器端编译 JSX，无需构建工具 |
+| Vite 8 | 构建工具，开发热更新 |
+| React 19 | npm 依赖 |
 | 火山引擎 TOS SDK | CDN 加载，对象存储上传图片 |
 | GitHub Gist API | 数据同步后端（免费，私有 Gist） |
 | 火山引擎 Responses/Chat API | AI 图片/文字识别，json_schema 结构化输出 |
@@ -15,16 +15,61 @@
 
 **部署地址**: `https://comoysha.github.io/medical_records/`
 
+## 开发流程
+
+```bash
+cd medical_records_src
+npm install          # 首次安装依赖
+npm run dev          # 本地开发（http://localhost:5173）
+npm run build        # 构建到 ../medical_records/
+npm run preview      # 预览构建产物
+```
+
+构建输出到 `../medical_records/`（即部署目录），`emptyOutDir: true` 每次 build 会清空该目录。
+
 ## 文件结构
 
 ```
-/Users/xiayue/家庭诊疗记录/
-├── index.html          # 唯一源文件（~1550 行，含所有组件和逻辑）
-├── CLAUDE.md           # 本文档
-├── docs/
-│   └── 火山引擎结构化输出.md
-├── test_record.png     # 测试用图片
-└── 王溪茉出生证明.JPG   # 测试用图片
+comoysha.github.io/
+├── medical_records/              ← Vite build 输出（部署产物，勿手动编辑）
+│   ├── index.html
+│   └── assets/
+├── medical_records_src/          ← 源码目录
+│   ├── package.json
+│   ├── vite.config.js
+│   ├── index.html                ← Vite HTML 模板
+│   ├── CLAUDE.md                 ← 本文档
+│   ├── docs/
+│   │   └── 火山引擎结构化输出.md
+│   └── src/
+│       ├── main.jsx              ← ReactDOM.createRoot 入口
+│       ├── App.jsx               ← MedicalRecords 根组件
+│       ├── constants.js          ← DEFAULT_MEMBERS, RECORD_TYPES, createId, 键名常量
+│       ├── services/
+│       │   ├── storage.js        ← localStorage 封装
+│       │   ├── gistSync.js       ← GitHub Gist API
+│       │   ├── tosHelper.js      ← 火山引擎 TOS 上传（用 window.TOS）
+│       │   └── aiExtract.js      ← AI 识别 schema/prompt/调用
+│       ├── utils/
+│       │   └── stripBase64.js
+│       ├── config/
+│       │   └── typeFields.js     ← TYPE_FIELDS
+│       └── components/
+│           ├── MemberPill.jsx
+│           ├── TypeChip.jsx
+│           ├── ConfirmDialog.jsx
+│           ├── ImageViewer.jsx
+│           ├── MultiImageAttachment.jsx
+│           ├── ItemList.jsx
+│           ├── TypedFormFields.jsx
+│           ├── EditForm.jsx       ← 含 getRecordImages helper
+│           ├── RecordCard.jsx
+│           ├── AiTextModal.jsx
+│           ├── QuickForm.jsx
+│           ├── PhotoCapture.jsx
+│           ├── MemberManager.jsx
+│           ├── SyncSettingsModal.jsx
+│           └── SettingsModal.jsx
 ```
 
 ## 数据模型
@@ -145,7 +190,7 @@
 ## 组件树
 
 ```
-MedicalRecords (根组件，状态管理)
+App (根组件，状态管理)
 ├── SettingsModal (AI + TOS 配置)
 ├── SyncSettingsModal (Gist 配置)
 ├── Header
@@ -209,18 +254,18 @@ Body: {
 - 路径: `medical-images/{recordId}.{ext}` / `medical-images/{recordId}_thumb.{ext}`
 - Bucket 策略: `medical-images/*` 路径公开读
 
-## 重构注意事项
+## 开发注意事项
 
-1. **单文件局限**: 1550 行全在一个 `<script type="text/babel">` 里，Babel 运行时编译。如需拆分，需引入构建工具（Vite 等），同时改变部署方式。
+1. **图片兼容性**: 旧记录用 `imageUrl`/`imageData`（单值），新记录用 `images` 数组。`getRecordImages()` 函数（在 `EditForm.jsx` 中导出）负责兼容转换。推送同步时 `stripBase64()` 剔除 base64 只保留 URL。
 
-2. **图片兼容性**: 旧记录用 `imageUrl`/`imageData`（单值），新记录用 `images` 数组。`getRecordImages()` 函数负责兼容转换。推送同步时 `stripBase64()` 剔除 base64 只保留 URL。
+2. **TOS SDK**: 继续通过 CDN 加载 `window.TOS`，在 `tosHelper.js` 中使用 `new window.TOS()`。
 
-3. **无 TypeScript**: 所有类型约束靠运行时。数据结构变更需要同时改 AI 的 `MEDICAL_RECORD_SCHEMA`。
+3. **数据结构变更**: 需同时改 AI 的 `MEDICAL_RECORD_SCHEMA`（在 `aiExtract.js`）。
 
-4. **避免 Babel 不支持的语法**: 对象解构 rest spread（`({a, ...rest}) => rest`）会让 Babel standalone 静默失败导致白屏。用 `Object.assign` + `delete` 替代。
+4. **样式**: 全部 inline style，无 CSS 类。如需样式复用，可提取为 CSS 文件或 CSS-in-JS 方案。
 
-5. **状态分散**: 配置存 3 个不同的 localStorage 键，同步逻辑在 gistSync.push 里拼装。未来可统一为一个 config store。
+5. **状态管理**: 保持 useState + prop drilling。配置存 3 个不同的 localStorage 键。
 
 6. **TOS 密钥暴露**: AK/SK 存在浏览器端 localStorage 和 Gist 中。生产环境应改为 STS 临时凭证或后端签名。
 
-7. **样式**: 全部 inline style，无 CSS 类。如需样式复用，可提取为 CSS 文件或 CSS-in-JS 方案。
+7. **构建产物**: `medical_records/` 是 Vite 输出目录，不要手动编辑。每次 build 会完全覆盖。
