@@ -260,7 +260,7 @@ export default function MedicalRecords() {
   }, [sorted, groupBy]);
 
   return (
-    <div style={{ maxWidth: isDesktop ? 1200 : 480, margin: "0 auto", minHeight: "100vh", background: "#F5F3F0", fontFamily: "'Noto Sans SC', sans-serif" }}>
+    <div style={{ maxWidth: isDesktop ? undefined : 480, margin: "0 auto", minHeight: "100vh", background: "#F5F3F0", fontFamily: "'Noto Sans SC', sans-serif" }}>
       {showSettings && <SettingsModal aiConfig={aiConfig} onSave={saveAiConfig} onClose={() => setShowSettings(false)} onPush={pushNow} />}
       {showSync && <SyncSettingsModal onClose={() => setShowSync(false)} onSyncDone={handleSyncDone} aiConfig={aiConfig} />}
       <div style={{ background: "linear-gradient(135deg, #4A7C6F 0%, #3D6B5F 100%)", padding: "20px 20px 16px", position: "sticky", top: 0, zIndex: 10 }}>
