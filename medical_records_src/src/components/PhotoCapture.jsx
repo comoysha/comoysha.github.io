@@ -1,11 +1,9 @@
 import { useState, useRef } from 'react';
 import { RECORD_TYPES } from '../constants.js';
 import { extractFromImage } from '../services/aiExtract.js';
-import MemberPill from './MemberPill.jsx';
 import QuickForm from './QuickForm.jsx';
 
-export default function PhotoCapture({ members, onSave, onCancel, aiConfig, defaultMemberId }) {
-  const [memberId, setMemberId] = useState(defaultMemberId || members[0]?.id);
+export default function PhotoCapture({ memberId, onSave, onCancel, aiConfig }) {
   const [status, setStatus] = useState("idle"); // idle | processing | done | error | form
   const [extracted, setExtracted] = useState(null);
   const [imageData, setImageData] = useState(null);
@@ -35,11 +33,6 @@ export default function PhotoCapture({ members, onSave, onCancel, aiConfig, defa
 
   return (
     <div style={{ padding: "0 0 20px" }}>
-      {status !== "form" && (
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 14 }}>
-          {members.map(function(m) { return <MemberPill key={m.id} member={m} selected={memberId === m.id} onClick={function() { setMemberId(m.id); }} />; })}
-        </div>
-      )}
       {status === "idle" && (
         <div>
           <input ref={fileRef} type="file" accept="image/*" capture="environment" onChange={handleFile} style={{ display: "none" }} />

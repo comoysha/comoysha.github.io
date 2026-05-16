@@ -8,6 +8,7 @@ import { stripBase64 } from './utils/stripBase64.js';
 import SettingsModal from './components/SettingsModal.jsx';
 import SyncSettingsModal from './components/SyncSettingsModal.jsx';
 import MemberManager from './components/MemberManager.jsx';
+import HeaderMenu from './components/HeaderMenu.jsx';
 import MemberPill from './components/MemberPill.jsx';
 import RecordCard from './components/RecordCard.jsx';
 import PhotoCapture from './components/PhotoCapture.jsx';
@@ -39,6 +40,8 @@ export default function MedicalRecords() {
   const [showMobileSearch, setShowMobileSearch] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showSync, setShowSync] = useState(false);
+  const [showMembers, setShowMembers] = useState(false);
+  const [pendingPickAction, setPendingPickAction] = useState(null); // "form" | "photo"
   const [syncStatus, setSyncStatus] = useState("");
 
   // Auto-sync on load
@@ -263,6 +266,15 @@ export default function MedicalRecords() {
     <div style={{ maxWidth: isDesktop ? undefined : 480, margin: "0 auto", minHeight: "100vh", background: "#F5F3F0", fontFamily: "'Noto Sans SC', sans-serif" }}>
       {showSettings && <SettingsModal aiConfig={aiConfig} onSave={saveAiConfig} onClose={() => setShowSettings(false)} onPush={pushNow} />}
       {showSync && <SyncSettingsModal onClose={() => setShowSync(false)} onSyncDone={handleSyncDone} aiConfig={aiConfig} />}
+      <MemberManager open={showMembers} onClose={() => setShowMembers(false)} members={members} onUpdate={function(nextMembers) {
+        const nextIds = new Set(nextMembers.map(function(m) { return m.id; }));
+        const removedIds = members.filter(function(m) { return !nextIds.has(m.id); }).map(function(m) { return m.id; });
+        const nextDeletedMemberIds = removedIds.length ? Array.from(new Set(deletedMemberIds.concat(removedIds))) : deletedMemberIds;
+        setDeletedMemberIds(nextDeletedMemberIds);
+        localStorage.setItem(DELETED_MEMBER_IDS_KEY, JSON.stringify(nextDeletedMemberIds));
+        setMembers(nextMembers);
+        setTimeout(function() { pushNow(nextMembers); }, 100);
+      }} />
       <div style={{ background: "linear-gradient(135deg, #4A7C6F 0%, #3D6B5F 100%)", padding: "20px 20px 16px", position: "sticky", top: 0, zIndex: 10 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <div>
@@ -271,40 +283,48 @@ export default function MedicalRecords() {
           </div>
           <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
             <button onClick={() => setShowSync(true)} style={{
-              padding: "6px 10px", borderRadius: 10, border: "1.5px solid rgba(255,255,255,0.3)",
+              padding: "0 10px", height: 30, borderRadius: 10, border: "1.5px solid rgba(255,255,255,0.3)",
               background: syncStatus === "syncing" ? "rgba(255,255,255,0.3)" : syncStatus === "done" ? "rgba(100,200,150,0.3)" : syncStatus === "error" ? "rgba(200,100,100,0.3)" : "rgba(255,255,255,0.15)",
               fontSize: 12, color: "rgba(255,255,255,0.9)", cursor: "pointer", fontFamily: "'Noto Sans SC', sans-serif",
-              display: "flex", alignItems: "center", gap: 4,
+              display: "flex", alignItems: "center", gap: 4, whiteSpace: "nowrap",
             }} title="云同步">
               {syncStatus === "syncing" ? <span style={{ display: "inline-block", width: 10, height: 10, border: "1.5px solid rgba(255,255,255,0.3)", borderTopColor: "#fff", borderRadius: "50%", animation: "spin 0.8s linear infinite" }} /> : "☁️"}
               {syncStatus === "done" ? "已同步" : syncStatus === "error" ? "失败" : "同步"}
             </button>
-            {records.length > 0 && <button onClick={exportData} style={{
-              padding: "6px 10px", borderRadius: 10, border: "1.5px solid rgba(255,255,255,0.3)", background: "rgba(255,255,255,0.15)",
-              fontSize: 12, color: "rgba(255,255,255,0.8)", cursor: "pointer", fontFamily: "'Noto Sans SC', sans-serif",
-            }} title="导出数据">导出</button>}
-            <button onClick={() => setShowSettings(true)} style={{
-              padding: "6px 10px", borderRadius: 10, border: "1.5px solid rgba(255,255,255,0.3)", background: "rgba(255,255,255,0.15)",
-              fontSize: 14, color: "rgba(255,255,255,0.8)", cursor: "pointer",
-            }} title="火山引擎配置">⚙️</button>
-            <MemberManager members={members} onUpdate={function(nextMembers) {
-              const nextIds = new Set(nextMembers.map(function(m) { return m.id; }));
-              const removedIds = members.filter(function(m) { return !nextIds.has(m.id); }).map(function(m) { return m.id; });
-              const nextDeletedMemberIds = removedIds.length ? Array.from(new Set(deletedMemberIds.concat(removedIds))) : deletedMemberIds;
-              setDeletedMemberIds(nextDeletedMemberIds);
-              localStorage.setItem(DELETED_MEMBER_IDS_KEY, JSON.stringify(nextDeletedMemberIds));
-              setMembers(nextMembers);
-              setTimeout(function() { pushNow(nextMembers); }, 100);
-            }} />
+            {isDesktop ? (
+              <>
+                {records.length > 0 && <button onClick={exportData} style={{
+                  padding: "6px 10px", borderRadius: 10, border: "1.5px solid rgba(255,255,255,0.3)", background: "rgba(255,255,255,0.15)",
+                  fontSize: 12, color: "rgba(255,255,255,0.8)", cursor: "pointer", fontFamily: "'Noto Sans SC', sans-serif",
+                }} title="导出数据">导出</button>}
+                <button onClick={() => setShowSettings(true)} style={{
+                  padding: "6px 10px", borderRadius: 10, border: "1.5px solid rgba(255,255,255,0.3)", background: "rgba(255,255,255,0.15)",
+                  fontSize: 14, color: "rgba(255,255,255,0.8)", cursor: "pointer",
+                }} title="火山引擎配置">⚙️</button>
+                <button onClick={() => setShowMembers(true)} style={{
+                  padding: "6px 14px", borderRadius: 10, border: "1.5px solid rgba(255,255,255,0.3)", background: "rgba(255,255,255,0.15)",
+                  fontSize: 12, color: "rgba(255,255,255,0.8)", cursor: "pointer", fontFamily: "'Noto Sans SC', sans-serif",
+                }}>管理成员</button>
+              </>
+            ) : (
+              <HeaderMenu items={[
+                { icon: "📤", label: "导出", onClick: exportData, hide: records.length === 0 },
+                { icon: "⚙️", label: "设置", onClick: () => setShowSettings(true) },
+                { icon: "👥", label: "管理成员", onClick: () => setShowMembers(true) },
+              ]} />
+            )}
           </div>
         </div>
       </div>
 
       <div style={{ padding: "16px 16px 100px" }}>
-        {mode === "photo" && (
+        {mode === "photo" && formMemberId && (
           <div style={{ background: "#fff", borderRadius: 16, padding: 16, marginBottom: 16, boxShadow: "0 2px 12px rgba(0,0,0,0.06)" }}>
-            <div style={{ fontSize: 15, fontWeight: 600, color: "#333", marginBottom: 14 }}>📸 拍照识别</div>
-            <PhotoCapture members={members} onSave={addRecord} onCancel={function() { setMode("list"); }} aiConfig={aiConfig} defaultMemberId={filterMember !== "all" ? filterMember : null} />
+            <div style={{ fontSize: 15, fontWeight: 600, color: "#333", marginBottom: 4 }}>📸 拍照识别</div>
+            <div style={{ fontSize: 12, color: "#aaa", marginBottom: 14, fontFamily: "'Noto Sans SC', sans-serif" }}>
+              {(function() { const m = members.find(function(x) { return x.id === formMemberId; }); return m ? m.avatar + " " + m.name : ""; })()}
+            </div>
+            <PhotoCapture members={members} memberId={formMemberId} onSave={addRecord} onCancel={function() { setMode("list"); }} aiConfig={aiConfig} />
           </div>
         )}
 
@@ -314,7 +334,7 @@ export default function MedicalRecords() {
             <div style={{ fontSize: 12, color: "#aaa", marginBottom: 16, fontFamily: "'Noto Sans SC', sans-serif" }}>这条记录属于谁？</div>
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
               {members.map(function(m) { return (
-                <button key={m.id} onClick={function() { setFormMemberId(m.id); setMode("select-type"); }} style={{
+                <button key={m.id} onClick={function() { setFormMemberId(m.id); setMode(pendingPickAction === "photo" ? "photo" : "select-type"); }} style={{
                   display: "flex", alignItems: "center", gap: 12, padding: "14px 16px", borderRadius: 12,
                   border: "1.5px solid #e8e5e0", background: "#faf9f7", cursor: "pointer", transition: "all 0.15s",
                   fontFamily: "'Noto Sans SC', sans-serif",
@@ -382,22 +402,16 @@ export default function MedicalRecords() {
         )}
         {mode === "list" && !isDesktop && (
           <>
-            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
-              {showMobileSearch ? (
-                <SearchBar value={searchText} onChange={setSearchText} />
-              ) : null}
-              <button onClick={() => setShowMobileSearch(!showMobileSearch)} style={{
-                padding: "6px 10px", borderRadius: 10, border: "1.5px solid #e8e5e0",
-                background: showMobileSearch || searchText ? "#4A7C6F18" : "#fff",
-                color: showMobileSearch || searchText ? "#4A7C6F" : "#999",
-                fontSize: 14, cursor: "pointer", flexShrink: 0,
-              }}>🔍</button>
+            <div style={{ marginBottom: 10 }}>
+              <SearchBar value={searchText} onChange={setSearchText} />
             </div>
             <div style={{ display: "flex", gap: 6, marginBottom: 10, overflowX: "auto", paddingBottom: 4 }}>
               <button onClick={() => setFilterMember("all")} style={{
-                padding: "5px 14px", borderRadius: 16, border: filterMember === "all" ? "2px solid #4A7C6F" : "2px solid transparent",
-                background: filterMember === "all" ? "#4A7C6F18" : "#fff", color: filterMember === "all" ? "#4A7C6F" : "#999",
-                fontSize: 13, fontWeight: filterMember === "all" ? 600 : 400, cursor: "pointer", whiteSpace: "nowrap", fontFamily: "'Noto Sans SC', sans-serif",
+                display: "flex", alignItems: "center", gap: 6, padding: "6px 14px", borderRadius: 20,
+                border: filterMember === "all" ? "2px solid #4A7C6F" : "2px solid transparent",
+                background: filterMember === "all" ? "#4A7C6F18" : "#f5f3f0", color: filterMember === "all" ? "#4A7C6F" : "#666",
+                fontSize: 14, fontWeight: filterMember === "all" ? 600 : 400, cursor: "pointer", whiteSpace: "nowrap",
+                fontFamily: "'Noto Sans SC', sans-serif", flexShrink: 0,
               }}>全部</button>
               {members.map((m) => <MemberPill key={m.id} member={m} selected={filterMember === m.id} onClick={() => setFilterMember(m.id)} />)}
             </div>
@@ -425,12 +439,12 @@ export default function MedicalRecords() {
 
       {mode === "list" && (
         <div style={{ position: "fixed", bottom: 24, left: "50%", transform: "translateX(-50%)", display: "flex", gap: 12, zIndex: 20 }}>
-          <button onClick={() => setMode("photo")} style={{
+          <button onClick={function() { const mid = filterMember !== "all" ? filterMember : null; if (mid) { setFormMemberId(mid); setMode("photo"); } else { setPendingPickAction("photo"); setMode("select-member"); } }} style={{
             width: 56, height: 56, borderRadius: "50%", border: "none", background: "#4A7C6F", color: "#fff",
             fontSize: 24, cursor: "pointer", boxShadow: "0 4px 16px rgba(74,124,111,0.4)",
             display: "flex", alignItems: "center", justifyContent: "center", transition: "transform 0.15s",
           }} onMouseDown={(e) => (e.currentTarget.style.transform = "scale(0.92)")} onMouseUp={(e) => (e.currentTarget.style.transform = "scale(1)")}>📸</button>
-          <button onClick={function() { const mid = filterMember !== "all" ? filterMember : null; if (mid) { setFormMemberId(mid); setMode("select-type"); } else { setMode("select-member"); } }} style={{
+          <button onClick={function() { const mid = filterMember !== "all" ? filterMember : null; if (mid) { setFormMemberId(mid); setMode("select-type"); } else { setPendingPickAction("form"); setMode("select-member"); } }} style={{
             width: 56, height: 56, borderRadius: "50%", border: "none", background: "#5B7FA5", color: "#fff",
             fontSize: 24, cursor: "pointer", boxShadow: "0 4px 16px rgba(91,127,165,0.4)",
             display: "flex", alignItems: "center", justifyContent: "center", transition: "transform 0.15s",
