@@ -1,15 +1,34 @@
 export default function ImageViewer({ src, onClose }) {
-  const handleDownload = function(e) {
+  const handleDownload = async function(e) {
     e.stopPropagation();
-    const a = document.createElement("a");
-    if (src.startsWith("data:")) {
-      a.href = src;
-    } else {
-      a.href = src;
-      a.target = "_blank";
+    const filename = "medical-image-" + Date.now() + ".jpg";
+    try {
+      const resp = await fetch(src);
+      const blob = await resp.blob();
+      const type = blob.type || "image/jpeg";
+      // iOS Safari ignores <a download> for cross-origin/data URLs.
+      // Web Share with a File lets the user save to Photos via the share sheet.
+      if (typeof File !== "undefined" && navigator.canShare) {
+        try {
+          const file = new File([blob], filename, { type: type });
+          if (navigator.canShare({ files: [file] })) {
+            await navigator.share({ files: [file] });
+            return;
+          }
+        } catch (_) { /* fall through */ }
+      }
+      const blobUrl = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = blobUrl;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(function() { URL.revokeObjectURL(blobUrl); }, 1000);
+    } catch (err) {
+      console.error("Download failed:", err);
+      window.open(src, "_blank");
     }
-    a.download = "medical-image-" + Date.now() + ".jpg";
-    a.click();
   };
   return (
     <div onClick={onClose} style={{
