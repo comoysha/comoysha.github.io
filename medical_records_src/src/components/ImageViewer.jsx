@@ -4,32 +4,41 @@ export default function ImageViewer({ src, onClose }) {
   const handleDownload = async function(e) {
     e.stopPropagation();
     const filename = "medical-image-" + Date.now() + ".jpg";
+    let blob;
     try {
       const resp = await fetch(src);
-      const blob = await resp.blob();
-      const type = blob.type || "image/jpeg";
-      // iOS Safari ignores <a download> for cross-origin/data URLs.
-      // Web Share with a File lets the user save to Photos via the share sheet.
-      if (typeof File !== "undefined" && navigator.canShare) {
-        try {
-          const file = new File([blob], filename, { type: type });
-          if (navigator.canShare({ files: [file] })) {
-            await navigator.share({ files: [file] });
-            return;
-          }
-        } catch (_) { /* fall through */ }
-      }
-      const blobUrl = URL.createObjectURL(blob);
+      if (!resp.ok) throw new Error("HTTP " + resp.status);
+      blob = await resp.blob();
+    } catch (err) {
+      // Gesture context is lost after await — window.open here gets popup-blocked
+      // on iOS Safari, leaving the user with nothing. Navigate the current tab
+      // instead so they can at least long-press to save.
+      console.error("Image fetch failed, navigating to src as fallback:", err);
+      window.location.assign(src);
+      return;
+    }
+    const type = blob.type || "image/jpeg";
+    // iOS Safari ignores <a download> for cross-origin/data URLs.
+    // Web Share with a File lets the user save to Photos via the share sheet.
+    if (typeof File !== "undefined" && navigator.canShare) {
+      try {
+        const file = new File([blob], filename, { type: type });
+        if (navigator.canShare({ files: [file] })) {
+          await navigator.share({ files: [file] });
+          return;
+        }
+      } catch (_) { /* fall through */ }
+    }
+    const blobUrl = URL.createObjectURL(blob);
+    try {
       const a = document.createElement("a");
       a.href = blobUrl;
       a.download = filename;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
+    } finally {
       setTimeout(function() { URL.revokeObjectURL(blobUrl); }, 1000);
-    } catch (err) {
-      console.error("Download failed:", err);
-      window.open(src, "_blank");
     }
   };
   const stop = function(e) { e.stopPropagation(); };
