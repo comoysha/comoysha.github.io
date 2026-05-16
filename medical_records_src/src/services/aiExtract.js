@@ -1,4 +1,25 @@
-export const PROMPT_TEXT = "你是医疗单据识别助手。请从图片中提取所有可识别的医疗信息，填入对应字段。无法识别的字段填空字符串或空数组。type 根据内容判断：就诊填 visit，用药填 medication，检查报告填 test，症状记录填 symptom，其他填 note。";
+export const PROMPT_TEXT = "你是医疗单据识别助手。请从图片中提取所有可识别的医疗信息，填入对应字段。无法识别的字段填空字符串或空数组。type 根据内容判断：就诊填 visit，用药填 medication，检查报告填 test，症状记录填 symptom，其他填 note。日期必须严格用 YYYY-MM-DD 格式（4位年-2位月-2位日，月日不足两位补0，分隔符必须是减号），例如 2026-05-11，不允许 2026-5-11 或 2026/5/11。";
+
+export function normalizeDate(s) {
+  if (!s || typeof s !== "string") return "";
+  const t = s.trim();
+  if (!t) return "";
+  const m = t.match(/^(\d{4})[-/.年](\d{1,2})[-/.月](\d{1,2})[日]?$/);
+  if (!m) return "";
+  const y = m[1];
+  const mo = m[2].padStart(2, "0");
+  const d = m[3].padStart(2, "0");
+  const n = parseInt(mo, 10), nd = parseInt(d, 10);
+  if (n < 1 || n > 12 || nd < 1 || nd > 31) return "";
+  return y + "-" + mo + "-" + d;
+}
+
+function normalizeRecord(rec) {
+  if (rec && typeof rec === "object") {
+    rec.date = normalizeDate(rec.date);
+  }
+  return rec;
+}
 
 export const MEDICAL_RECORD_SCHEMA = {
   type: "json_schema",
@@ -7,7 +28,7 @@ export const MEDICAL_RECORD_SCHEMA = {
   schema: {
     type: "object",
     properties: {
-      date: { type: "string", description: "日期 YYYY-MM-DD，无法识别则空字符串" },
+      date: { type: "string", description: "日期，必须严格为 YYYY-MM-DD 格式（4位年-2位月-2位日，月日不足两位需补0，分隔符必须用减号），例如 2026-05-11，不要写成 2026-5-11 或 2026/5/11。无法识别则空字符串。" },
       hospital: { type: "string", description: "医院名称，无则空字符串" },
       doctor: { type: "string", description: "医生姓名，无则空字符串" },
       diagnosis: { type: "string", description: "诊断结果，无则空字符串" },
@@ -93,7 +114,7 @@ export async function extractFromImage(base64Data, mediaType, config) {
       text = (data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content) || "";
     }
     const clean = text.replace(/```json|```/g, "").trim();
-    return JSON.parse(clean);
+    return normalizeRecord(JSON.parse(clean));
   } catch (e) {
     console.error("OCR failed:", e);
     return null;
@@ -105,7 +126,7 @@ export async function extractFromText(text, type, config) {
     const baseUrl = config.url.replace(/\/$/, "");
     const apiType = config.apiType || "responses";
     const typePrompt = TYPE_PROMPTS[type] || TYPE_PROMPTS.note;
-    const sysPrompt = "你是医疗记录解析助手。用户会提供一段关于医疗/健康的文字描述，请从中提取结构化信息。无法确定的字段填空字符串或空数组。type固定填\"" + type + "\"。\n" + typePrompt;
+    const sysPrompt = "你是医疗记录解析助手。用户会提供一段关于医疗/健康的文字描述，请从中提取结构化信息。无法确定的字段填空字符串或空数组。type固定填\"" + type + "\"。日期必须严格用 YYYY-MM-DD 格式（月日不足两位补0，分隔符必须用减号），例如 2026-05-11，不允许 2026-5-11 或 2026/5/11。\n" + typePrompt;
     let url, body;
 
     if (apiType === "responses") {
@@ -142,7 +163,7 @@ export async function extractFromText(text, type, config) {
     } else {
       resultText = (data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content) || "";
     }
-    return JSON.parse(resultText.replace(/```json|```/g, "").trim());
+    return normalizeRecord(JSON.parse(resultText.replace(/```json|```/g, "").trim()));
   } catch (e) {
     console.error("Text extraction failed:", e);
     return null;

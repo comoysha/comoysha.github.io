@@ -11,9 +11,9 @@ export default function ItemList({ items, onChange, nameLabel, valueLabel, value
     onChange(items.concat([o]));
   };
   const handleRemove = function(idx) { onChange(items.filter(function(_, i) { return i !== idx; })); };
-  const rowStyle = { display: "flex", gap: 6, marginBottom: 6, alignItems: "center" };
+  const rowStyle = { display: "flex", gap: 6, marginBottom: 6, alignItems: "center", width: "100%" };
   const inputStyle = {
-    flex: 1, padding: "8px 10px", borderRadius: 8, border: "1.5px solid #e8e5e0",
+    flex: 1, minWidth: 0, width: 0, padding: "8px 10px", borderRadius: 8, border: "1.5px solid #e8e5e0",
     fontSize: 13, fontFamily: "'Noto Sans SC', sans-serif", background: "#faf9f7", outline: "none", boxSizing: "border-box",
   };
   return (
