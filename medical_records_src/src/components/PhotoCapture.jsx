@@ -8,7 +8,8 @@ export default function PhotoCapture({ memberId, onSave, onCancel, aiConfig }) {
   const [extracted, setExtracted] = useState(null);
   const [imageData, setImageData] = useState(null);
   const [imageThumb, setImageThumb] = useState(null);
-  const fileRef = useRef();
+  const cameraRef = useRef();
+  const galleryRef = useRef();
 
   const handleFile = async (e) => {
     const file = e.target.files && e.target.files[0];
@@ -35,15 +36,25 @@ export default function PhotoCapture({ memberId, onSave, onCancel, aiConfig }) {
     <div style={{ padding: "0 0 20px" }}>
       {status === "idle" && (
         <div>
-          <input ref={fileRef} type="file" accept="image/*" capture="environment" onChange={handleFile} style={{ display: "none" }} />
-          <button onClick={function() { fileRef.current && fileRef.current.click(); }} style={{
-            width: "100%", padding: "40px 20px", borderRadius: 16, border: "2px dashed #d0cdc5",
-            background: "#faf9f7", cursor: "pointer", display: "flex", flexDirection: "column", alignItems: "center", gap: 8,
-          }}>
-            <span style={{ fontSize: 36 }}>📸</span>
-            <span style={{ fontSize: 14, color: "#888", fontFamily: "'Noto Sans SC', sans-serif" }}>拍照或选取单据</span>
-            <span style={{ fontSize: 12, color: "#bbb", fontFamily: "'Noto Sans SC', sans-serif" }}>AI自动识别提取信息</span>
-          </button>
+          <input ref={cameraRef} type="file" accept="image/*" capture="environment" onChange={handleFile} style={{ display: "none" }} />
+          <input ref={galleryRef} type="file" accept="image/*" onChange={handleFile} style={{ display: "none" }} />
+          <div style={{ display: "flex", gap: 10 }}>
+            <button onClick={function() { cameraRef.current && cameraRef.current.click(); }} style={{
+              flex: 1, padding: "32px 12px", borderRadius: 16, border: "2px dashed #d0cdc5",
+              background: "#faf9f7", cursor: "pointer", display: "flex", flexDirection: "column", alignItems: "center", gap: 6,
+            }}>
+              <span style={{ fontSize: 32 }}>📸</span>
+              <span style={{ fontSize: 14, color: "#888", fontFamily: "'Noto Sans SC', sans-serif" }}>拍照</span>
+            </button>
+            <button onClick={function() { galleryRef.current && galleryRef.current.click(); }} style={{
+              flex: 1, padding: "32px 12px", borderRadius: 16, border: "2px dashed #d0cdc5",
+              background: "#faf9f7", cursor: "pointer", display: "flex", flexDirection: "column", alignItems: "center", gap: 6,
+            }}>
+              <span style={{ fontSize: 32 }}>🖼️</span>
+              <span style={{ fontSize: 14, color: "#888", fontFamily: "'Noto Sans SC', sans-serif" }}>从相册选</span>
+            </button>
+          </div>
+          <div style={{ textAlign: "center", fontSize: 12, color: "#bbb", marginTop: 10, fontFamily: "'Noto Sans SC', sans-serif" }}>AI自动识别提取信息</div>
         </div>
       )}
       {status === "processing" && (
