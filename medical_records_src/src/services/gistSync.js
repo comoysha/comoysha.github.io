@@ -74,17 +74,24 @@ export const gistSync = {
     // Collect deleted IDs from both sides
     const deletedIds = new Set([...(local.deletedIds || []), ...(remote.deletedIds || [])]);
 
-    // Merge records: union by id, prefer newer (higher createdAt), exclude deleted
+    // Merge records: union by id, exclude deleted. Same-id resolution prefers
+    // the side carrying the newer image format (imageKey) so a client whose
+    // localStorage still holds legacy imageUrl records can't silently overwrite
+    // already-migrated gist data. Falls back to createdAt otherwise.
     const localRecords = local.records || [];
     const remoteRecords = remote.records || [];
+    const hasNewImages = (rec) => Array.isArray(rec.images) && rec.images.some((i) => i && i.imageKey);
     const recordMap = new Map();
     for (const r of remoteRecords) { if (!deletedIds.has(r.id)) recordMap.set(r.id, r); }
     for (const r of localRecords) {
       if (deletedIds.has(r.id)) { recordMap.delete(r.id); continue; }
       const existing = recordMap.get(r.id);
-      if (!existing || (r.createdAt || 0) >= (existing.createdAt || 0)) {
-        recordMap.set(r.id, r);
-      }
+      if (!existing) { recordMap.set(r.id, r); continue; }
+      const localNew = hasNewImages(r);
+      const remoteNew = hasNewImages(existing);
+      if (remoteNew && !localNew) continue; // keep remote (newer format)
+      if (localNew && !remoteNew) { recordMap.set(r.id, r); continue; }
+      if ((r.createdAt || 0) >= (existing.createdAt || 0)) recordMap.set(r.id, r);
     }
     const mergedRecords = [...recordMap.values()].sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
     return { members: mergedMembers, records: mergedRecords, deletedIds: [...deletedIds], deletedMemberIds: [...deletedMemberIds] };
