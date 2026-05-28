@@ -6,7 +6,9 @@ import TypeChip from './TypeChip.jsx';
 import TypedFormFields from './TypedFormFields.jsx';
 import MultiImageAttachment from './MultiImageAttachment.jsx';
 
-// Helper: convert old single-image record to images array
+// Normalize a record's image fields into an array of image objects.
+// Each item may have: imageKey/thumbKey (new), imageUrl/thumbUrl (legacy full URL),
+// imageData/imageThumb (base64, pre-upload or upload-failed fallback).
 export function getRecordImages(record) {
   if (record.images && record.images.length) return record.images;
   if (record.imageUrl) return [{ imageUrl: record.imageUrl, thumbUrl: record.thumbUrl }];
@@ -42,13 +44,14 @@ export default function EditForm({ record, members, onSave, onCancel }) {
       const uploaded = [];
       for (let i = 0; i < images.length; i++) {
         const img = images[i];
+        if (img.imageKey) { uploaded.push({ imageKey: img.imageKey, thumbKey: img.thumbKey }); continue; }
         if (img.imageUrl) { uploaded.push({ imageUrl: img.imageUrl, thumbUrl: img.thumbUrl }); continue; }
         if (img.imageData && tosHelper.isConfigured()) {
           try {
             const imgId = record.id + "-" + i + "-" + Date.now();
-            const u = await tosHelper.uploadBase64(img.imageData, imgId);
-            const t = await tosHelper.uploadThumb(img.imageThumb, imgId);
-            uploaded.push({ imageUrl: u, thumbUrl: t });
+            const imageKey = await tosHelper.uploadBase64(img.imageData, imgId);
+            const thumbKey = await tosHelper.uploadThumb(img.imageThumb, imgId);
+            uploaded.push({ imageKey, thumbKey });
           } catch (e) { uploaded.push({ imageData: img.imageData, imageThumb: img.imageThumb }); }
         } else if (img.imageData) {
           uploaded.push({ imageData: img.imageData, imageThumb: img.imageThumb });

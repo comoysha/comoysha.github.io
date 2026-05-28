@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { RECORD_TYPES } from '../constants.js';
 import { getRecordImages } from './EditForm.jsx';
+import { getThumbSrc, getFullSrc } from '../utils/imageSrc.js';
 import ImageViewer from './ImageViewer.jsx';
 import EditForm from './EditForm.jsx';
 import ConfirmDialog from './ConfirmDialog.jsx';
@@ -34,10 +35,10 @@ export default function RecordCard({ record, members, onDelete, onEdit, compact 
           const imgs = getRecordImages(record);
           if (imgs.length === 0) return null;
           const first = imgs[0];
-          const src = first.thumbUrl || first.imageThumb || first.imageUrl || first.imageData;
+          const src = getThumbSrc(first);
           return (
             <div style={{ position: "relative", marginLeft: 10, flexShrink: 0 }}>
-              <img src={src} alt="" onClick={function(e) { e.stopPropagation(); setViewImage(first.imageUrl || first.imageData || src); }} style={{ width: 44, height: 44, borderRadius: 8, objectFit: "cover", cursor: "pointer" }} />
+              <img src={src} alt="" onClick={function(e) { e.stopPropagation(); setViewImage(getFullSrc(first)); }} style={{ width: 44, height: 44, borderRadius: 8, objectFit: "cover", cursor: "pointer" }} />
               {imgs.length > 1 && <span style={{ position: "absolute", bottom: -2, right: -2, background: "#4A7C6F", color: "#fff", fontSize: 10, fontWeight: 600, borderRadius: 8, padding: "1px 5px", lineHeight: 1.4 }}>{imgs.length}</span>}
             </div>
           );
@@ -60,8 +61,8 @@ export default function RecordCard({ record, members, onDelete, onEdit, compact 
             return (
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
                 {imgs.map(function(img, i) {
-                  const src = img.imageUrl || img.imageData || img.thumbUrl || img.imageThumb;
-                  return <img key={i} src={src} alt="" onClick={function(e) { e.stopPropagation(); setViewImage(img.imageUrl || img.imageData || src); }} style={{ width: imgs.length === 1 ? "100%" : 120, height: imgs.length === 1 ? "auto" : 120, borderRadius: 8, objectFit: "cover", cursor: "pointer" }} />;
+                  const src = getFullSrc(img);
+                  return <img key={i} src={src} alt="" onClick={function(e) { e.stopPropagation(); setViewImage(src); }} style={{ width: imgs.length === 1 ? "100%" : 120, height: imgs.length === 1 ? "auto" : 120, borderRadius: 8, objectFit: "cover", cursor: "pointer" }} />;
                 })}
               </div>
             );

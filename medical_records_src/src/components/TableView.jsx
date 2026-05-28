@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { RECORD_TYPES } from '../constants.js';
 import { getRecordImages } from './EditForm.jsx';
+import { getThumbSrc, getFullSrc } from '../utils/imageSrc.js';
 import ImageViewer from './ImageViewer.jsx';
 import EditForm from './EditForm.jsx';
 import ConfirmDialog from './ConfirmDialog.jsx';
@@ -103,8 +104,8 @@ export default function TableView({ records, members, onDelete, onEdit }) {
                       return (
                         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
                           {imgs.map((img, i) => {
-                            const src = img.thumbUrl || img.imageThumb || img.imageUrl || img.imageData;
-                            return <img key={i} src={src} alt="" onClick={() => setViewImage(img.imageUrl || img.imageData || src)} style={{ width: 100, height: 100, borderRadius: 8, objectFit: "cover", cursor: "pointer" }} />;
+                            const src = getThumbSrc(img);
+                            return <img key={i} src={src} alt="" onClick={() => setViewImage(getFullSrc(img))} style={{ width: 100, height: 100, borderRadius: 8, objectFit: "cover", cursor: "pointer" }} />;
                           })}
                         </div>
                       );

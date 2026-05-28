@@ -21,15 +21,25 @@ export const tosHelper = {
       bucket: c.bucket,
     });
   },
+  // Build a renderable URL from a TOS key. If passed a full URL or data: URL, returns as-is
+  // (so callers can use this on legacy imageUrl fields without branching).
+  buildUrl(keyOrUrl) {
+    if (!keyOrUrl) return null;
+    if (keyOrUrl.startsWith("http://") || keyOrUrl.startsWith("https://") || keyOrUrl.startsWith("data:")) {
+      return keyOrUrl;
+    }
+    const c = this.getConfig();
+    if (!c.bucket) return null;
+    const region = c.region || "cn-beijing";
+    return "https://" + c.bucket + ".tos-" + region + ".volces.com/" + keyOrUrl;
+  },
   async upload(file, recordId) {
     const client = this.getClient();
     if (!client) throw new Error("TOS 未配置");
     const ext = (file.name || "photo.jpg").split(".").pop().toLowerCase();
     const key = "medical-images/" + recordId + "." + ext;
     await client.putObject({ key: key, body: file });
-    const c = this.getConfig();
-    const region = c.region || "cn-beijing";
-    return "https://" + c.bucket + ".tos-" + region + ".volces.com/" + key;
+    return key;
   },
   async uploadBase64(base64DataUrl, recordId) {
     const parts = base64DataUrl.split(",");
@@ -54,8 +64,6 @@ export const tosHelper = {
     const client = this.getClient();
     if (!client) throw new Error("TOS 未配置");
     await client.putObject({ key: key, body: blob });
-    const c = this.getConfig();
-    const region = c.region || "cn-beijing";
-    return "https://" + c.bucket + ".tos-" + region + ".volces.com/" + key;
+    return key;
   },
 };
