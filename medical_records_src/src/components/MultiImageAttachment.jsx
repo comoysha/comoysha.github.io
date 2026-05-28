@@ -1,4 +1,5 @@
 import { useRef } from 'react';
+import { getThumbSrc } from '../utils/imageSrc.js';
 
 export default function MultiImageAttachment({ images, onChange }) {
   const fileRef = useRef();
@@ -31,7 +32,7 @@ export default function MultiImageAttachment({ images, onChange }) {
       {images.length > 0 && (
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
           {images.map(function(img, i) {
-            const src = img.thumbUrl || img.imageThumb || img.imageUrl || img.imageData;
+            const src = getThumbSrc(img);
             return (
               <div key={i} style={{ position: "relative", display: "inline-block" }}>
                 <img src={src} alt="" style={{ width: 64, height: 64, borderRadius: 10, objectFit: "cover" }} />

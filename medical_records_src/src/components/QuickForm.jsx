@@ -43,13 +43,14 @@ export default function QuickForm({ type, memberId, onSave, onCancel, aiConfig, 
       const uploaded = [];
       for (let i = 0; i < images.length; i++) {
         const img = images[i];
+        if (img.imageKey) { uploaded.push({ imageKey: img.imageKey, thumbKey: img.thumbKey }); continue; }
         if (img.imageUrl) { uploaded.push({ imageUrl: img.imageUrl, thumbUrl: img.thumbUrl }); continue; }
         if (img.imageData && tosHelper.isConfigured()) {
           try {
             const imgId = id + "-" + i;
-            const u = await tosHelper.uploadBase64(img.imageData, imgId);
-            const t = await tosHelper.uploadThumb(img.imageThumb, imgId);
-            uploaded.push({ imageUrl: u, thumbUrl: t });
+            const imageKey = await tosHelper.uploadBase64(img.imageData, imgId);
+            const thumbKey = await tosHelper.uploadThumb(img.imageThumb, imgId);
+            uploaded.push({ imageKey, thumbKey });
           } catch (e) { uploaded.push({ imageData: img.imageData, imageThumb: img.imageThumb }); }
         } else if (img.imageData) {
           uploaded.push({ imageData: img.imageData, imageThumb: img.imageThumb });
