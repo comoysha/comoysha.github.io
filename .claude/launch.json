@@ -1,0 +1,19 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "medical-records-dev",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev"],
+      "port": 5173,
+      "cwd": "/Users/xiayue/comoysha.github.io/medical_records_src"
+    },
+    {
+      "name": "medical-records-fix-wt",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev", "--", "--port", "5174", "--strictPort"],
+      "port": 5174,
+      "cwd": "/Users/xiayue/comoysha.github.io/.worktrees/feat-ui-updates/medical_records_src"
+    }
+  ]
+}
